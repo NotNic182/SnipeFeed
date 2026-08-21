@@ -12,6 +12,8 @@ namespace SnipeFeed {
         std::string songName;
         std::string songAuthor;
         std::string songHash;
+        std::string avatarUrl;   // player avatar image URL (may be empty)
+        std::string coverUrl;    // song cover art URL (may be empty)
         std::string difficulty;
         std::string modifiers;
         float accuracy = 0.0f;

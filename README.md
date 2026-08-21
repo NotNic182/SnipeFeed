@@ -58,6 +58,7 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 9. **[v0.4.0]** Covers and avatars appear as rows scroll into view; placeholder tiles shown while images load.
 10. **[v0.4.0]** Fast scroll up/down → no cell ever shows another row's image.
 11. **[v0.4.0]** Close and reopen the view within 2 minutes → instant load, no "Loading..." message. Press Refresh to force reload.
+12. **[v0.4.0]** Refresh with ~20 followed players completes noticeably faster than v0.3.0 (parallel fetch).
 
 ## Rollback
 

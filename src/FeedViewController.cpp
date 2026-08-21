@@ -121,9 +121,9 @@ void FeedViewController::OnCellClicked(int listIdx) {
     auto const& e = state.entries[state.selected];
 
     if (detailText) {
-        std::string info = "<b>" + e.songName + "</b>";
+        std::string info = "<size=140%><b>" + e.songName + "</b></size>";
         if (!e.songAuthor.empty())
-            info += "\n<size=80%><color=#888888>" + e.songAuthor + "</color></size>";
+            info += "\n<color=#888888>" + e.songAuthor + "</color>";
         if (!e.difficulty.empty() || e.stars > 0.0f)
             info += "\n<size=85%>" + Format::SongLine(e).substr(e.songName.size()) + "</size>";
         info += "\n" + Format::StatsLine(e);
@@ -250,7 +250,13 @@ void FeedViewController::PlaySelected() {
 }
 
 void FeedViewController::Refresh() {
-    if (state.refreshInFlight.load()) return;
+    if (state.refreshInFlight.load()) {
+        // A fetch from a previous (possibly destroyed) view is still running.
+        // Give a freshly recreated view something other than a blank screen
+        // while it completes.
+        if (statusText) statusText->set_text("Loading...");
+        return;
+    }
 
     std::string playerInput = getModConfig().PlayerId.GetValue();
 
@@ -276,15 +282,17 @@ void FeedViewController::Refresh() {
             state.refreshInFlight.store(false);
             BSML::MainThreadScheduler::Schedule([weakSelf, generation, result = std::move(result)]() mutable {
                 if (generation != state.refreshGeneration.load()) return;
-                if (!weakSelf) return;
 
                 if (!result.success) {
                     state.entries.clear();
                     state.players.clear();
-                    weakSelf->RebuildFilter();
-                    weakSelf->RebuildList();
-                    if (weakSelf->statusText)
-                        weakSelf->statusText->set_text(result.error);
+                    state.selected = -1;
+                    if (weakSelf) {
+                        weakSelf->RebuildFilter();
+                        weakSelf->RebuildList();
+                        if (weakSelf->statusText)
+                            weakSelf->statusText->set_text(result.error);
+                    }
                     return;
                 }
 
@@ -299,9 +307,18 @@ void FeedViewController::Refresh() {
                     state.playerFilter.clear();
 
                 state.lastFetchTime = static_cast<long long>(std::time(nullptr));
+                // Stale selection would otherwise index into the new entries
+                // array and could launch the wrong song.
+                state.selected = -1;
+                // A successful refresh means the feed (and its images) are
+                // current again — let previously-failed images retry.
+                SnipeFeed::SpriteCache::ClearFailures();
 
-                weakSelf->RebuildFilter();
-                weakSelf->RebuildList();
+                if (weakSelf) {
+                    weakSelf->RebuildFilter();
+                    weakSelf->RebuildList();
+                    if (weakSelf->detailModal) weakSelf->detailModal->Hide();
+                }
             });
         });
 }
@@ -399,7 +416,7 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
         coverElement->set_preferredHeight(20.0f);
         modalCover->set_preserveAspect(true);
         detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
-        detailText->set_fontSize(3.4f);
+        detailText->set_fontSize(3.5f);
         detailText->set_enableWordWrapping(true);
 
         auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());

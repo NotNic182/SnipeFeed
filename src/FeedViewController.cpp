@@ -1,5 +1,6 @@
 #include "FeedViewController.hpp"
 #include "Feed.hpp"
+#include "FeedCell.hpp"
 #include "Format.hpp"
 #include "ModConfig.hpp"
 #include "SongInstaller.hpp"
@@ -35,34 +36,24 @@ DEFINE_TYPE(SnipeFeed, FeedViewController);
 using namespace SnipeFeed;
 
 namespace {
-    // Bumped on every refresh so results from an outdated request are dropped.
-    std::atomic<int> refreshGeneration{0};
-    std::atomic<bool> refreshInFlight{false};
-
-    // Plain data, safe as file statics across view re-creation.
-    std::vector<FeedEntry> gEntries;
-    std::vector<int> gVisible;          // list row -> gEntries index
-    std::vector<std::string> gPlayers;  // unique player names, feed order
-    std::string gPlayerFilter;          // empty = all players
-    int gSelected = -1;
-    bool gBusyPlaying = false;
+    // Plain data, deliberately file-static: it survives BSML re-creating the
+    // view, which is what lets the feed persist across menu visits.
+    struct FeedState {
+        std::atomic<int> refreshGeneration{0};
+        std::atomic<bool> refreshInFlight{false};
+        std::vector<FeedEntry> entries;
+        std::vector<int> visible;           // list row -> entries index
+        std::vector<std::string> players;   // unique player names, feed order
+        std::vector<std::string> filterNames; // owned strings backing the dropdown
+        std::string playerFilter;           // empty = all players
+        int selected = -1;
+        bool busyPlaying = false;
+        long long lastFetchTime = 0;        // unix time of last successful fetch
+    };
+    FeedState state;
 
     constexpr auto FILTER_ALL = "All players";
-
-    // Line 1: song, colored difficulty, stars.
-    std::string CellTitle(FeedEntry const& e) { return Format::SongLine(e); }
-
-    // Line 2, list version: the LevelListTableCell subtitle does NOT parse
-    // rich text (tags render literally), so this stays plain.
-    std::string CellSubtitle(FeedEntry const& e) {
-        std::string line = e.playerName;
-        line += std::format("   {:.2f}%", e.accuracy * 100.0f);
-        if (e.pp > 0.0f) line += std::format("   {:.0f}pp", e.pp);
-        if (e.fullCombo) line += "   FC";
-        if (!e.modifiers.empty()) line += "   +" + e.modifiers;
-        line += "   " + Format::TimeAgo(e.timepost);
-        return line;
-    }
+    constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
 
     // Modal version: rich text works there.
     std::string RichSubtitle(FeedEntry const& e) {
@@ -79,57 +70,62 @@ void FeedViewController::RebuildFilter() {
     for (int i = filterContainer->get_childCount() - 1; i >= 0; i--)
         UnityEngine::Object::Destroy(filterContainer->GetChild(i)->get_gameObject());
 
-    static std::vector<std::string> ownedNames;
-    ownedNames.clear();
-    ownedNames.push_back(FILTER_ALL);
-    for (auto const& name : gPlayers)
-        ownedNames.push_back(name);
+    state.filterNames.clear();
+    state.filterNames.push_back(FILTER_ALL);
+    for (auto const& name : state.players)
+        state.filterNames.push_back(name);
+    std::vector<std::string_view> views(state.filterNames.begin(), state.filterNames.end());
 
-    std::vector<std::string_view> views(ownedNames.begin(), ownedNames.end());
-    std::string current = gPlayerFilter.empty() ? FILTER_ALL : gPlayerFilter;
+    std::string current = state.playerFilter.empty() ? FILTER_ALL : state.playerFilter;
 
     auto self = this;
     BSML::Lite::CreateDropdown(filterContainer, "Player", current, views, [self](StringW value) {
         std::string selected = static_cast<std::string>(value);
-        gPlayerFilter = (selected == FILTER_ALL) ? "" : selected;
+        state.playerFilter = (selected == FILTER_ALL) ? "" : selected;
         self->RebuildList();
     });
 }
 
 void FeedViewController::RebuildList() {
-    if (!listData) return;
+    if (!listData || !listData->tableView) return;
 
-    gVisible.clear();
-    listData->data->Clear();
-    for (int i = 0; i < static_cast<int>(gEntries.size()); i++) {
-        auto const& e = gEntries[i];
-        if (!gPlayerFilter.empty() && e.playerName != gPlayerFilter)
+    state.visible.clear();
+    for (int i = 0; i < static_cast<int>(state.entries.size()); i++) {
+        if (!state.playerFilter.empty() && state.entries[i].playerName != state.playerFilter)
             continue;
-        gVisible.push_back(i);
-        listData->data->Add(BSML::CustomCellInfo::construct(CellTitle(e), CellSubtitle(e)));
+        state.visible.push_back(i);
     }
-    if (listData->tableView) {
-        listData->tableView->ReloadData();
-        listData->tableView->ClearSelection();
-    }
+    listData->tableView->ReloadData();
+    listData->tableView->ClearSelection();
 
     if (statusText) {
-        if (gEntries.empty()) {
+        if (state.entries.empty()) {
             // Keep whatever error/progress message is already showing.
-        } else if (gPlayerFilter.empty()) {
-            statusText->set_text(std::format("{} recent scores. Newest first — go snipe!", gEntries.size()));
+        } else if (state.playerFilter.empty()) {
+            statusText->set_text(std::format("{} recent scores. Newest first — go snipe!", state.entries.size()));
         } else {
-            statusText->set_text(std::format("{} of {} scores by {}", gVisible.size(), gEntries.size(), gPlayerFilter));
+            statusText->set_text(std::format("{} of {} scores by {}", state.visible.size(), state.entries.size(), state.playerFilter));
         }
     }
 }
 
+HMUI::TableCell* FeedViewController::CellForIdx(HMUI::TableView* tableView, int idx) {
+    auto cell = FeedCell::GetCell(tableView);
+    if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
+        cell->SetData(state.entries[state.visible[idx]]);
+    return cell;
+}
+
+float FeedViewController::CellSize() { return FeedCell::CELL_HEIGHT; }
+
+int FeedViewController::NumberOfCells() { return static_cast<int>(state.visible.size()); }
+
 void FeedViewController::OnCellClicked(int listIdx) {
     if (listData && listData->tableView)
         listData->tableView->ClearSelection();
-    if (listIdx < 0 || listIdx >= static_cast<int>(gVisible.size())) return;
-    gSelected = gVisible[listIdx];
-    auto const& e = gEntries[gSelected];
+    if (listIdx < 0 || listIdx >= static_cast<int>(state.visible.size())) return;
+    state.selected = state.visible[listIdx];
+    auto const& e = state.entries[state.selected];
 
     if (detailText) {
         std::string info = "<b>" + e.songName + "</b>";
@@ -148,7 +144,7 @@ void FeedViewController::OnCellClicked(int listIdx) {
             playButtonText->set_text("Download & Play");
     }
     if (playButton)
-        playButton->set_interactable(!e.songHash.empty() && !gBusyPlaying);
+        playButton->set_interactable(!e.songHash.empty() && !state.busyPlaying);
 
     if (detailModal)
         detailModal->Show();
@@ -176,9 +172,9 @@ void FeedViewController::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
 }
 
 void FeedViewController::PlaySelected() {
-    if (gBusyPlaying) return;
-    if (gSelected < 0 || gSelected >= static_cast<int>(gEntries.size())) return;
-    auto entry = gEntries[gSelected];
+    if (state.busyPlaying) return;
+    if (state.selected < 0 || state.selected >= static_cast<int>(state.entries.size())) return;
+    auto entry = state.entries[state.selected];
     if (entry.songHash.empty()) return;
 
     if (auto level = Installer::GetInstalledLevel(entry.songHash)) {
@@ -186,7 +182,7 @@ void FeedViewController::PlaySelected() {
         return;
     }
 
-    gBusyPlaying = true;
+    state.busyPlaying = true;
     if (playButton) playButton->set_interactable(false);
     if (playButtonText) playButtonText->set_text("Downloading...");
 
@@ -194,7 +190,7 @@ void FeedViewController::PlaySelected() {
     Installer::DownloadAndInstallAsync(entry.songHash, [weakSelf, entry](bool success, std::string error) {
         BSML::MainThreadScheduler::Schedule([weakSelf, entry, success, error = std::move(error)] {
             if (!success) {
-                gBusyPlaying = false;
+                state.busyPlaying = false;
                 if (weakSelf) {
                     if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Download & Play");
                     if (weakSelf->playButton) weakSelf->playButton->set_interactable(true);
@@ -210,7 +206,7 @@ void FeedViewController::PlaySelected() {
 
             // Same grace period the BeatLeader mod uses before opening.
             BSML::MainThreadScheduler::ScheduleAfterTime(5, [weakSelf, entry]() mutable {
-                gBusyPlaying = false;
+                state.busyPlaying = false;
                 auto level = Installer::GetInstalledLevel(entry.songHash);
                 if (!weakSelf) return;
                 if (weakSelf->playButton) weakSelf->playButton->set_interactable(true);
@@ -228,12 +224,12 @@ void FeedViewController::PlaySelected() {
 }
 
 void FeedViewController::Refresh() {
-    if (refreshInFlight.load()) return;
+    if (state.refreshInFlight.load()) return;
 
     std::string playerInput = getModConfig().PlayerId.GetValue();
 
-    refreshInFlight.store(true);
-    int generation = ++refreshGeneration;
+    state.refreshInFlight.store(true);
+    int generation = ++state.refreshGeneration;
     auto weakSelf = UnityW<FeedViewController>(this);
 
     if (statusText) statusText->set_text("Loading...");
@@ -245,20 +241,20 @@ void FeedViewController::Refresh() {
         playerInput, maxPlayers, scoresPerPlayer,
         [weakSelf, generation](std::string progress) {
             BSML::MainThreadScheduler::Schedule([weakSelf, generation, progress = std::move(progress)] {
-                if (generation != refreshGeneration.load()) return;
+                if (generation != state.refreshGeneration.load()) return;
                 if (weakSelf && weakSelf->statusText)
                     weakSelf->statusText->set_text(progress);
             });
         },
         [weakSelf, generation](FeedResult result) {
-            refreshInFlight.store(false);
+            state.refreshInFlight.store(false);
             BSML::MainThreadScheduler::Schedule([weakSelf, generation, result = std::move(result)]() mutable {
-                if (generation != refreshGeneration.load()) return;
+                if (generation != state.refreshGeneration.load()) return;
                 if (!weakSelf) return;
 
                 if (!result.success) {
-                    gEntries.clear();
-                    gPlayers.clear();
+                    state.entries.clear();
+                    state.players.clear();
                     weakSelf->RebuildFilter();
                     weakSelf->RebuildList();
                     if (weakSelf->statusText)
@@ -266,15 +262,17 @@ void FeedViewController::Refresh() {
                     return;
                 }
 
-                gEntries = std::move(result.entries);
-                gPlayers.clear();
-                for (auto const& e : gEntries) {
-                    if (std::find(gPlayers.begin(), gPlayers.end(), e.playerName) == gPlayers.end())
-                        gPlayers.push_back(e.playerName);
+                state.entries = std::move(result.entries);
+                state.players.clear();
+                for (auto const& e : state.entries) {
+                    if (std::find(state.players.begin(), state.players.end(), e.playerName) == state.players.end())
+                        state.players.push_back(e.playerName);
                 }
                 // Drop a stale filter if that player vanished from the feed.
-                if (!gPlayerFilter.empty() && std::find(gPlayers.begin(), gPlayers.end(), gPlayerFilter) == gPlayers.end())
-                    gPlayerFilter.clear();
+                if (!state.playerFilter.empty() && std::find(state.players.begin(), state.players.end(), state.playerFilter) == state.players.end())
+                    state.playerFilter.clear();
+
+                state.lastFetchTime = static_cast<long long>(std::time(nullptr));
 
                 weakSelf->RebuildFilter();
                 weakSelf->RebuildList();
@@ -341,9 +339,17 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
 
         // The scrollable list carries its own LayoutElement sized from the
         // sizeDelta we pass, so it slots into the stack as a normal child.
+        // CreateScrollableList wires onCellWithIdxClicked to the TableView's
+        // own didSelectCellWithIdxEvent (a field on HMUI::TableView itself,
+        // confirmed via extern/includes/bs-cordl/include/HMUI/zzzz__TableView_def.hpp
+        // — offset 0x50, independent of _dataSource). That event fires
+        // whenever a cell reports selection regardless of which IDataSource
+        // is installed, so swapping SetDataSource below does not disturb it
+        // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
         listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {95.0f, 50.0f}, [self](int idx) {
             self->OnCellClicked(idx);
         });
+        listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
 
         // Detail modal with the play button.
         detailModal = BSML::Lite::CreateModal(get_transform(), {75.0f, 45.0f}, nullptr, true);
@@ -363,5 +369,12 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
         playButtonText = playButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
     }
 
-    Refresh();
+    bool stale = state.entries.empty()
+        || (static_cast<long long>(std::time(nullptr)) - state.lastFetchTime) > REFRESH_MAX_AGE_SECONDS;
+    if (stale) {
+        Refresh();
+    } else {
+        RebuildFilter();
+        RebuildList();
+    }
 }

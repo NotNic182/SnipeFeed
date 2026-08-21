@@ -6,7 +6,9 @@
 #include "beatsaber-hook/shared/config/config-utils.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <filesystem>
+#include <mutex>
 #include <thread>
 
 namespace SnipeFeed {
@@ -292,11 +294,32 @@ namespace SnipeFeed {
                 return;
             }
 
-            for (size_t i = 0; i < following.size(); i++) {
-                if (onProgress)
-                    onProgress("Loading scores " + std::to_string(i + 1) + "/" + std::to_string(following.size()) + " (" + following[i].name + ")...");
-                FetchRecentScores(following[i], scoresPerPlayer, result.entries);
+            if (onProgress) onProgress("Loading scores... 0/" + std::to_string(following.size()));
+
+            std::atomic<size_t> nextIdx{0};
+            std::atomic<size_t> doneCount{0};
+            std::mutex mergeMutex;
+            size_t workerCount = std::min<size_t>(4, following.size());
+            std::vector<std::thread> workers;
+            workers.reserve(workerCount);
+            for (size_t w = 0; w < workerCount; w++) {
+                workers.emplace_back([&] {
+                    while (true) {
+                        size_t i = nextIdx.fetch_add(1);
+                        if (i >= following.size()) break;
+                        std::vector<FeedEntry> local;
+                        FetchRecentScores(following[i], scoresPerPlayer, local);
+                        size_t done = doneCount.fetch_add(1) + 1;
+                        if (onProgress)
+                            onProgress("Loading scores... " + std::to_string(done) + "/" + std::to_string(following.size()));
+                        std::lock_guard<std::mutex> lock(mergeMutex);
+                        result.entries.insert(result.entries.end(),
+                                              std::make_move_iterator(local.begin()),
+                                              std::make_move_iterator(local.end()));
+                    }
+                });
             }
+            for (auto& t : workers) t.join();
 
             std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
                 return a.timepost > b.timepost;

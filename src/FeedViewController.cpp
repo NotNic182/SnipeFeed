@@ -4,6 +4,7 @@
 #include "Format.hpp"
 #include "ModConfig.hpp"
 #include "SongInstaller.hpp"
+#include "SpriteCache.hpp"
 #include "main.hpp"
 
 #include "bsml/shared/BSML-Lite.hpp"
@@ -54,14 +55,6 @@ namespace {
 
     constexpr auto FILTER_ALL = "All players";
     constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
-
-    // Modal version: rich text works there.
-    std::string RichSubtitle(FeedEntry const& e) {
-        std::string line = "<color=#ffffff>" + e.playerName + "</color>";
-        line += "   " + Format::StatsLine(e);
-        line += "   <color=#777777>" + Format::TimeAgo(e.timepost) + "</color>";
-        return line;
-    }
 }
 
 void FeedViewController::RebuildFilter() {
@@ -130,9 +123,42 @@ void FeedViewController::OnCellClicked(int listIdx) {
     if (detailText) {
         std::string info = "<b>" + e.songName + "</b>";
         if (!e.songAuthor.empty())
-            info += "\n<size=80%><color=#bbbbbb>" + e.songAuthor + "</color></size>";
-        info += "\n\n" + RichSubtitle(e);
+            info += "\n<size=80%><color=#888888>" + e.songAuthor + "</color></size>";
+        if (!e.difficulty.empty() || e.stars > 0.0f)
+            info += "\n<size=85%>" + Format::SongLine(e).substr(e.songName.size()) + "</size>";
+        info += "\n" + Format::StatsLine(e);
+        info += "\n<size=75%><color=#777777>" + Format::TimeAgo(e.timepost) + "</color></size>";
         detailText->set_text(info);
+    }
+    if (modalPlayerText) modalPlayerText->set_text(e.playerName);
+
+    // Images, with the same stale-guard the cells use.
+    modalPendingCover = e.coverUrl;
+    modalPendingAvatar = e.avatarUrl;
+    if (modalCover) {
+        modalCover->set_sprite(nullptr);
+        modalCover->set_color({1.0f, 1.0f, 1.0f, 0.15f});
+    }
+    if (modalAvatar) {
+        modalAvatar->set_sprite(nullptr);
+        modalAvatar->set_color({1.0f, 1.0f, 1.0f, 0.15f});
+    }
+    auto weakSelf = UnityW<FeedViewController>(this);
+    if (!e.coverUrl.empty()) {
+        SpriteCache::GetSprite(e.coverUrl, [weakSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
+            if (!weakSelf || !weakSelf->modalCover) return;
+            if (!weakSelf->modalPendingCover || static_cast<std::string>(weakSelf->modalPendingCover) != url) return;
+            weakSelf->modalCover->set_sprite(sprite);
+            weakSelf->modalCover->set_color({1.0f, 1.0f, 1.0f, 1.0f});
+        });
+    }
+    if (!e.avatarUrl.empty()) {
+        SpriteCache::GetSprite(e.avatarUrl, [weakSelf, url = e.avatarUrl](UnityEngine::Sprite* sprite) {
+            if (!weakSelf || !weakSelf->modalAvatar) return;
+            if (!weakSelf->modalPendingAvatar || static_cast<std::string>(weakSelf->modalPendingAvatar) != url) return;
+            weakSelf->modalAvatar->set_sprite(sprite);
+            weakSelf->modalAvatar->set_color({1.0f, 1.0f, 1.0f, 1.0f});
+        });
     }
 
     if (playButtonText) {
@@ -351,18 +377,44 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
         });
         listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
 
-        // Detail modal with the play button.
-        detailModal = BSML::Lite::CreateModal(get_transform(), {75.0f, 45.0f}, nullptr, true);
+        // Detail modal: cover art + song text on top, avatar + player row,
+        // stats, then the play button. Same data as before, card look.
+        detailModal = BSML::Lite::CreateModal(get_transform(), {90.0f, 52.0f}, nullptr, true);
         auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
         modalLayout->set_childControlWidth(true);
         modalLayout->set_childControlHeight(true);
         modalLayout->set_childForceExpandWidth(true);
         modalLayout->set_childForceExpandHeight(false);
-        modalLayout->set_spacing(2.0f);
+        modalLayout->set_spacing(1.5f);
         modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(3, 3, 3, 3));
-        detailText = BSML::Lite::CreateText(modalLayout->get_transform(), "");
+
+        auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
+        coverRow->set_childControlWidth(true);
+        coverRow->set_childControlHeight(true);
+        coverRow->set_childForceExpandWidth(false);
+        coverRow->set_spacing(3.0f);
+        modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {20.0f, 20.0f});
+        auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        coverElement->set_preferredWidth(20.0f);
+        coverElement->set_preferredHeight(20.0f);
+        modalCover->set_preserveAspect(true);
+        detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
         detailText->set_fontSize(3.4f);
         detailText->set_enableWordWrapping(true);
+
+        auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
+        playerRow->set_childControlWidth(true);
+        playerRow->set_childControlHeight(true);
+        playerRow->set_childForceExpandWidth(false);
+        playerRow->set_spacing(1.5f);
+        modalAvatar = BSML::Lite::CreateImage(playerRow->get_transform(), nullptr, {0.0f, 0.0f}, {4.0f, 4.0f});
+        auto avatarElement = modalAvatar->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        avatarElement->set_preferredWidth(4.0f);
+        avatarElement->set_preferredHeight(4.0f);
+        modalAvatar->set_preserveAspect(true);
+        modalPlayerText = BSML::Lite::CreateText(playerRow->get_transform(), "");
+        modalPlayerText->set_fontSize(3.2f);
+
         playButton = BSML::Lite::CreateUIButton(modalLayout->get_transform(), "Play", [self]() {
             self->PlaySelected();
         });

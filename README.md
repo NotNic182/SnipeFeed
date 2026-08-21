@@ -54,18 +54,24 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 5. Enter your real ID → progress text, then feed sorted newest-first.
 6. Airplane-mode the headset → Refresh shows network error, gameplay unaffected.
 7. Enter/exit a song, reopen feed → still works (no duplicate UI).
+8. **[v0.4.0]** Open Snipe Feed → cards render with cover art (left), avatar + player name + time (center), song title + colored difficulty + stars, colored stats.
+9. **[v0.4.0]** Covers and avatars appear as rows scroll into view; placeholder tiles shown while images load.
+10. **[v0.4.0]** Fast scroll up/down → no cell ever shows another row's image.
+11. **[v0.4.0]** Close and reopen the view within 2 minutes → instant load, no "Loading..." message. Press Refresh to force reload.
 
 ## Rollback
 
 Remove the mod in MBF/QuestPatcher, or delete `SnipeFeed.qmod`'s installed files via the mod manager. The mod writes only its own config file (`.../ModData/.../Configs/snipefeed.json` per config-utils) and never touches PlayerData.dat, AvatarData.dat, or settings.cfg. Previous game state is untouched.
 
-## v0.3.0 features
+## v0.4.0 features
 
-- Proper scrollable table list (game-native cells): song + colored difficulty + stars on line 1; player, color-graded accuracy, PP, FC, modifiers, time-ago on line 2.
-- **Player filter** dropdown (All players / any player in the feed).
-- Tap a score → detail modal with **Play / Download & Play**: checks installed custom levels via SongCore by hash; if missing, downloads the map zip from BeatSaver, installs it into the custom levels folder, refreshes SongCore, then jumps straight to the song in solo Custom Levels with it selected.
+- **BeatLeader-style score cards**: each row displays song cover art (left), player avatar with name and time-ago (center), song title with colored difficulty and star rating, and color-graded accuracy / purple PP / FC badge / modifiers.
+- **Detail modal redesigned**: large cover art at top, avatar + player row, colored stats display. **Play / Download & Play** button: checks installed custom levels via SongCore by hash; if missing, downloads the map zip from BeatSaver, installs it into the custom levels folder, refreshes SongCore, then jumps straight to the song.
+- **Parallel score loading**: followed players' scores now load in parallel (up to 4 at once) when using the public-API path — much faster refresh on feeds with 20+ followed players.
+- **2-minute feed cache**: the feed is kept in memory between menu visits — reopening is instant. Press **Refresh** to force a reload from the API.
+- **Image caching**: song covers and player avatars are cached per session and downloaded once per URL.
 
-## Known limitations (v0.3.0)
+## Known limitations (v0.4.0)
 
 - Official OST/DLC map scores have no custom-song hash — their Play button is disabled ("Not a custom song").
 - Follows capped (default 20 players × 3 scores) in the public-API fallback path; the friends-feed path (BeatLeader login cookie) gets everything in one request.

@@ -2,6 +2,7 @@
 
 #include "custom-types/shared/macros.hpp"
 #include "GlobalNamespace/BeatmapLevel.hpp"
+#include "HMUI/ImageView.hpp"
 #include "HMUI/TableCell.hpp"
 #include "HMUI/TableView.hpp"
 #include "HMUI/ViewController.hpp"
@@ -26,6 +27,11 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedViewController, HMUI::ViewContro
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, detailText);
     DECLARE_INSTANCE_FIELD(UnityEngine::UI::Button*, playButton);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, playButtonText);
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalCover);
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalAvatar);
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, modalPlayerText);
+    DECLARE_INSTANCE_FIELD(StringW, modalPendingCover);
+    DECLARE_INSTANCE_FIELD(StringW, modalPendingAvatar);
 
     DECLARE_INSTANCE_METHOD(void, Refresh);
 

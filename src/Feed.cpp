@@ -17,6 +17,7 @@ namespace SnipeFeed {
     struct FollowedPlayer {
         std::string id;
         std::string name;
+        std::string avatar;
     };
 
     static std::string GetString(rapidjson::Value const& obj, char const* key) {
@@ -55,13 +56,16 @@ namespace SnipeFeed {
         FeedEntry entry;
         entry.playerId = fallbackPlayer.id;
         entry.playerName = fallbackPlayer.name;
+        entry.avatarUrl = fallbackPlayer.avatar;
 
         auto player = score.FindMember("player");
         if (player != score.MemberEnd() && player->value.IsObject()) {
             auto id = GetString(player->value, "id");
             auto name = GetString(player->value, "name");
+            auto avatar = GetString(player->value, "avatar");
             if (!id.empty()) entry.playerId = id;
             if (!name.empty()) entry.playerName = name;
+            if (!avatar.empty()) entry.avatarUrl = avatar;
         }
 
         entry.accuracy = static_cast<float>(GetNumber(score, "accuracy"));
@@ -77,6 +81,7 @@ namespace SnipeFeed {
                 entry.songName = GetString(song->value, "name");
                 entry.songAuthor = GetString(song->value, "author");
                 entry.songHash = GetString(song->value, "hash");
+                entry.coverUrl = GetString(song->value, "coverImage");
             }
             auto diff = lb->value.FindMember("difficulty");
             if (diff != lb->value.MemberEnd() && diff->value.IsObject()) {
@@ -129,7 +134,7 @@ namespace SnipeFeed {
         auto data = doc.FindMember("data");
         if (data == doc.MemberEnd() || !data->value.IsArray()) return false;
 
-        FollowedPlayer unknown{"", "?"};
+        FollowedPlayer unknown{"", "?", ""};
         for (auto const& score : data->value.GetArray()) {
             if (score.IsObject())
                 ParseScore(score, unknown, outEntries);
@@ -195,6 +200,7 @@ namespace SnipeFeed {
             FollowedPlayer fp;
             fp.id = GetString(p, "id");
             fp.name = GetString(p, "name");
+            fp.avatar = GetString(p, "avatar");
             if (!fp.id.empty())
                 outPlayers.push_back(std::move(fp));
         }
@@ -270,7 +276,7 @@ namespace SnipeFeed {
                 return;
             }
 
-            FollowedPlayer self{input, input};
+            FollowedPlayer self{input, input, ""};
             if (!IsNumeric(input)) {
                 if (onProgress) onProgress("Resolving '" + input + "'...");
                 if (!ResolvePlayer(input, self, result.error)) {

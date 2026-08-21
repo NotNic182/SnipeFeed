@@ -1,5 +1,6 @@
 #include "FeedViewController.hpp"
 #include "Feed.hpp"
+#include "Format.hpp"
 #include "ModConfig.hpp"
 #include "SongInstaller.hpp"
 #include "main.hpp"
@@ -48,73 +49,26 @@ namespace {
 
     constexpr auto FILTER_ALL = "All players";
 
-    std::string TimeAgo(long long timepost) {
-        if (timepost <= 0) return "";
-        long long diff = static_cast<long long>(std::time(nullptr)) - timepost;
-        if (diff < 0) diff = 0;
-        if (diff < 60) return "just now";
-        if (diff < 3600) return std::to_string(diff / 60) + "m ago";
-        if (diff < 86400) return std::to_string(diff / 3600) + "h ago";
-        return std::to_string(diff / 86400) + "d ago";
-    }
-
-    // BetterSongSearch-style difficulty colors.
-    char const* DiffColor(std::string const& diff) {
-        if (diff == "Easy") return "#3cb371";
-        if (diff == "Normal") return "#59b0f4";
-        if (diff == "Hard") return "#ff6347";
-        if (diff == "Expert") return "#bf2a42";
-        if (diff == "ExpertPlus") return "#8f48db";
-        return "#bbbbbb";
-    }
-
-    char const* AccColor(float acc) {
-        if (acc >= 0.95f) return "#ffdd57";
-        if (acc >= 0.90f) return "#57ff8a";
-        if (acc >= 0.80f) return "#59b0f4";
-        return "#bbbbbb";
-    }
-
-    std::string DiffLabel(std::string const& diff) {
-        return diff == "ExpertPlus" ? "Ex+" : diff;
-    }
-
     // Line 1: song, colored difficulty, stars.
-    std::string CellTitle(FeedEntry const& e) {
-        std::string line = e.songName;
-        if (!e.difficulty.empty())
-            line += "  <size=75%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
-        if (e.stars > 0.0f)
-            line += std::format("  <size=75%><color=#ffaa22>{:.1f}★</color></size>", e.stars);
-        return line;
-    }
+    std::string CellTitle(FeedEntry const& e) { return Format::SongLine(e); }
 
     // Line 2, list version: the LevelListTableCell subtitle does NOT parse
     // rich text (tags render literally), so this stays plain.
     std::string CellSubtitle(FeedEntry const& e) {
         std::string line = e.playerName;
         line += std::format("   {:.2f}%", e.accuracy * 100.0f);
-        if (e.pp > 0.0f)
-            line += std::format("   {:.0f}pp", e.pp);
-        if (e.fullCombo)
-            line += "   FC";
-        if (!e.modifiers.empty())
-            line += "   +" + e.modifiers;
-        line += "   " + TimeAgo(e.timepost);
+        if (e.pp > 0.0f) line += std::format("   {:.0f}pp", e.pp);
+        if (e.fullCombo) line += "   FC";
+        if (!e.modifiers.empty()) line += "   +" + e.modifiers;
+        line += "   " + Format::TimeAgo(e.timepost);
         return line;
     }
 
-    // Line 2, modal version: modal text is a normal TMP label, rich text works.
+    // Modal version: rich text works there.
     std::string RichSubtitle(FeedEntry const& e) {
         std::string line = "<color=#ffffff>" + e.playerName + "</color>";
-        line += std::format("   <color={}>{:.2f}%</color>", AccColor(e.accuracy), e.accuracy * 100.0f);
-        if (e.pp > 0.0f)
-            line += std::format("   <color=#8992e8>{:.0f}pp</color>", e.pp);
-        if (e.fullCombo)
-            line += "   <color=#57ff8a>FC</color>";
-        if (!e.modifiers.empty())
-            line += "   <color=#999999>+" + e.modifiers + "</color>";
-        line += "   <color=#777777>" + TimeAgo(e.timepost) + "</color>";
+        line += "   " + Format::StatsLine(e);
+        line += "   <color=#777777>" + Format::TimeAgo(e.timepost) + "</color>";
         return line;
     }
 }

@@ -2,6 +2,8 @@
 
 #include "custom-types/shared/macros.hpp"
 #include "GlobalNamespace/BeatmapLevel.hpp"
+#include "HMUI/TableCell.hpp"
+#include "HMUI/TableView.hpp"
 #include "HMUI/ViewController.hpp"
 #include "TMPro/TextMeshProUGUI.hpp"
 #include "UnityEngine/Transform.hpp"
@@ -9,8 +11,13 @@
 #include "bsml/shared/BSML/Components/CustomListTableData.hpp"
 #include "bsml/shared/BSML/Components/ModalView.hpp"
 
-DECLARE_CLASS_CODEGEN(SnipeFeed, FeedViewController, HMUI::ViewController) {
+DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedViewController, HMUI::ViewController, HMUI::TableView::IDataSource*)
+{
     DECLARE_OVERRIDE_METHOD_MATCH(void, DidActivate, &HMUI::ViewController::DidActivate, bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling);
+
+    DECLARE_OVERRIDE_METHOD_MATCH(HMUI::TableCell*, CellForIdx, &HMUI::TableView::IDataSource::CellForIdx, HMUI::TableView* tableView, int idx);
+    DECLARE_OVERRIDE_METHOD_MATCH(float, CellSize, &HMUI::TableView::IDataSource::CellSize);
+    DECLARE_OVERRIDE_METHOD_MATCH(int, NumberOfCells, &HMUI::TableView::IDataSource::NumberOfCells);
 
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, statusText);
     DECLARE_INSTANCE_FIELD(BSML::CustomListTableData*, listData);

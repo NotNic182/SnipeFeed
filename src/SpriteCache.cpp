@@ -68,4 +68,8 @@ namespace SnipeFeed::SpriteCache {
         cache.clear();
         failed.clear();
     }
+
+    void ClearFailures() {
+        failed.clear();
+    }
 }

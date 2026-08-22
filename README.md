@@ -64,10 +64,15 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 15. **[v0.5.0]** Header is a single row: player filter dropdown left, "Scores" 10–100 stepper and Refresh right; no search bar. Status line renders small and muted; scroll arrows centered over the rows.
 16. **[v0.5.0]** Set Scores to 100 → refresh pulls up to 100 scores (status line count matches); set to 10 → 10 scores.
 17. **[v0.5.0]** With no BeatLeader mod login and no PlayerId in the config file → clear instruction message, no crash.
+18. **[v1.0.0]** Each row leads with a large "Song Name - Artist [mapper]" title (plus difficulty and stars); below it sit the avatar, a smaller player name, the score stats, and the time-ago.
 
 ## Rollback
 
 Remove the mod in MBF/QuestPatcher, or delete `SnipeFeed.qmod`'s installed files via the mod manager. The mod writes only its own config file (`.../ModData/.../Configs/snipefeed.json` per config-utils) and never touches PlayerData.dat, AvatarData.dat, or settings.cfg. Previous game state is untouched.
+
+## v1.0.0 features
+
+- **Song-first rows**: the title line moved to the top of each row and grew — "Song Name - Artist [mapper]" with difficulty and stars — while the player identity (avatar + name) moved underneath at a smaller size, next to the score stats and time-ago. The mapper name now comes straight from BeatLeader's song metadata and also appears in the detail modal's byline.
 
 ## v0.5.0 features
 

@@ -82,6 +82,7 @@ namespace SnipeFeed {
             if (song != lb->value.MemberEnd() && song->value.IsObject()) {
                 entry.songName = GetString(song->value, "name");
                 entry.songAuthor = GetString(song->value, "author");
+                entry.mapper = GetString(song->value, "mapper");
                 entry.songHash = GetString(song->value, "hash");
                 entry.coverUrl = GetString(song->value, "coverImage");
             }

@@ -149,8 +149,12 @@ void FeedViewController::OnCellClicked(int listIdx) {
 
     if (detailText) {
         std::string info = "<size=140%><b>" + e.songName + "</b></size>";
-        if (!e.songAuthor.empty())
-            info += "\n<color=#888888>" + e.songAuthor + "</color>";
+        if (!e.songAuthor.empty() || !e.mapper.empty()) {
+            std::string byline = e.songAuthor;
+            if (!e.mapper.empty())
+                byline += (byline.empty() ? "[" : " [") + e.mapper + "]";
+            info += "\n<color=#888888>" + byline + "</color>";
+        }
         if (!e.difficulty.empty() || e.stars > 0.0f)
             info += "\n<size=85%>" + Format::SongLine(e).substr(e.songName.size()) + "</size>";
         info += "\n" + Format::StatsLine(e);

@@ -7,6 +7,8 @@
 #include "UnityEngine/Color.hpp"
 #include "UnityEngine/GameObject.hpp"
 
+#include <format>
+
 DEFINE_TYPE(SnipeFeed, FeedCell);
 
 using namespace SnipeFeed;
@@ -14,19 +16,22 @@ using namespace SnipeFeed;
 namespace {
     constexpr auto REUSE_ID = "SnipeFeedCellReuse";
 
-    // Card layout, BeatLeader style. ids bind to the DECLARE_INSTANCE_FIELDs.
+    // Row layout, BeatLeader style, reading left to right: rank, cover,
+    // then (avatar + name + time) over one song/stats line, chevron last.
+    // ids bind to the DECLARE_INSTANCE_FIELDs.
     constexpr auto CELL_BSML = R"(
-<horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
-    <image id='coverImage' pref-width='10' pref-height='10' preserve-aspect='true'/>
-    <vertical spacing='0' pref-width='78' child-expand-height='false' child-control-height='true'>
-        <horizontal spacing='1' pref-height='4' child-expand-width='false' child-control-width='true'>
-            <image id='avatarImage' pref-width='4' pref-height='4' preserve-aspect='true'/>
-            <text id='playerText' font-size='3.5' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false' flexible-width='1000'/>
-            <text id='timeText' font-size='2.5' color='#888888' align='MidlineRight' word-wrapping='false'/>
+<horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' child-align='MiddleLeft' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
+    <text id='rankText' font-size='3.2' align='Center' word-wrapping='false' pref-width='4'/>
+    <image id='coverImage' pref-width='10.5' pref-height='10.5' preserve-aspect='true'/>
+    <vertical spacing='0' pref-width='77' flexible-width='1000' child-expand-height='false' child-control-height='true'>
+        <horizontal spacing='1.5' pref-height='5.5' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
+            <image id='avatarImage' pref-width='4.5' pref-height='4.5' preserve-aspect='true'/>
+            <text id='playerText' font-size='4' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
+            <text id='timeText' font-size='2.8' color='#8899AA' align='MidlineLeft' word-wrapping='false' flexible-width='1000'/>
         </horizontal>
-        <text id='songText' font-size='3.2' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
-        <text id='statsText' font-size='3' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
+        <text id='infoText' font-size='3.2' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
     </vertical>
+    <text id='chevronText' font-size='4.5' color='#5A6B7A' align='Center' word-wrapping='false' pref-width='3'/>
 </horizontal>)";
 
     // While an image is loading (or failed) the ImageView shows as a dim
@@ -34,8 +39,18 @@ namespace {
     constexpr UnityEngine::Color PLACEHOLDER_TINT = {1.0f, 1.0f, 1.0f, 0.15f};
     constexpr UnityEngine::Color LOADED_TINT = {1.0f, 1.0f, 1.0f, 1.0f};
 
-    constexpr float BG_ALPHA_IDLE = 0.45f;
+    constexpr float BG_ALPHA_IDLE = 0.55f;
     constexpr float BG_ALPHA_ACTIVE = 0.8f;
+
+    // Top three ranks get medal-ish colors, the rest stay muted.
+    char const* RankColor(int rank) {
+        switch (rank) {
+            case 1: return "#FFB921";
+            case 2: return "#C4CEDC";
+            case 3: return "#D98E4A";
+            default: return "#5A6B7A";
+        }
+    }
 }
 
 FeedCell* FeedCell::GetCell(HMUI::TableView* tableView) {
@@ -46,17 +61,21 @@ FeedCell* FeedCell::GetCell(HMUI::TableView* tableView) {
         cell->set_interactable(true);
         cell->set_reuseIdentifier(REUSE_ID);
         BSML::parse_and_construct(CELL_BSML, cell->get_transform(), cell);
+        cell->chevronText->set_text(">");
         go->AddComponent<HMUI::Touchable*>();
         return cell;
     }
     return tableCell.cast<FeedCell>();
 }
 
-void FeedCell::SetData(FeedEntry const& entry) {
-    playerText->set_text(entry.playerName);
+void FeedCell::SetData(FeedEntry const& entry, int rank) {
+    if (rank <= 3)
+        rankText->set_text(std::format("<b><color={}>{}</color></b>", RankColor(rank), rank));
+    else
+        rankText->set_text(std::format("<color={}>{}</color>", RankColor(rank), rank));
+    playerText->set_text("<b>" + entry.playerName + "</b>");
     timeText->set_text(Format::TimeAgo(entry.timepost));
-    songText->set_text(Format::SongLine(entry));
-    statsText->set_text(Format::StatsLine(entry));
+    infoText->set_text(Format::InfoLine(entry));
 
     ResetImages();
 

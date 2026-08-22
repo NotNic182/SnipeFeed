@@ -10,7 +10,7 @@ Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed**
 
 1. Install `SnipeFeed.qmod` (see Install below).
 2. In the main menu, open **Snipe Feed**.
-3. If you are logged in inside the official BeatLeader mod, the feed loads automatically — nothing to enter. Otherwise enter your BeatLeader **ID, alias (e.g. `nic`), or pasted profile URL** and press **Refresh**.
+3. If you are logged in inside the official BeatLeader mod, the feed loads automatically — nothing to enter. Then press **Refresh**.
 
 The value is saved to the mod config; after that the feed loads whenever you open the view.
 
@@ -36,39 +36,10 @@ qpm s qmod       # packages SnipeFeed.qmod
 
 ## How it works
 
-1. **Preferred:** if the official BeatLeader mod's login cookie exists on the headset (`ModData/.../Mods/bl/cookies/cookies.txt`), one call to `GET api.beatleader.com/user/friendScores?sortBy=date&order=desc` returns the same feed the BeatLeader website home page shows. The cookie is read-only reused, never modified or logged.
-2. **Fallback (public API, no login):**
-   - non-numeric input is resolved via `GET /player/{aliasOrId}` (the server resolves aliases itself);
-   - `GET /player/{id}/followers?type=following` — note BeatLeader hides this list when the profile has "hide my friends" enabled, in which case the mod explains what to do;
-   - `GET /player/{id}/scores?sortBy=date&order=desc` per followed player.
-3. Entries merged and sorted newest-first: player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, time ago.
+1. If the official BeatLeader mod's login cookie exists on the headset (`ModData/.../Mods/bl/cookies/cookies.txt`), one call to `GET api.beatleader.com/user/friendScores?sortBy=date&order=desc` returns the same feed the BeatLeader website home page shows. The cookie is read-only reused, never modified or logged.
+2.  Entries merged and sorted newest-first: player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, time ago.
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
-
-## Test plan
-
-1. Boot game → no crash, `SnipeFeed` listed in mod logs (`qpm s log`).
-2. Main menu → Mods section shows **Snipe Feed** button.
-3. Open while logged into the BeatLeader mod → friends feed loads, no crash.
-4. **[changed in v0.5.0]** No login + bogus `PlayerId` in the config file (e.g. `1`) → clean error message.
-5. **[changed in v0.5.0]** No login + your real `PlayerId` in the config file → progress text, then feed sorted newest-first.
-6. Airplane-mode the headset → Refresh shows network error, gameplay unaffected.
-7. Enter/exit a song, reopen feed → still works (no duplicate UI).
-8. **[v0.4.0]** Open Snipe Feed → cards render with cover art (left), avatar + player name + time (center), song title + colored difficulty + stars, colored stats.
-9. **[v0.4.0]** Covers and avatars appear as rows scroll into view; placeholder tiles shown while images load.
-10. **[v0.4.0]** Fast scroll up/down → no cell ever shows another row's image.
-11. **[v0.4.0]** Close and reopen the view within 2 minutes → instant load, no "Loading..." message. Press Refresh to force reload.
-12. **[v0.4.0]** Refresh with ~20 followed players completes noticeably faster than v0.3.0 (parallel fetch).
-13. **[v0.5.0]** Rows read left → right: rank number, cover art, avatar + bold player name (visible!) with time-ago beside it, then one song/stats line (song · difficulty · stars · accuracy · FC), chevron at the right edge.
-14. **[v0.5.0]** All cover tiles identical size and vertically aligned; row backgrounds clearly separate entries; ranks 1–3 tinted gold/silver/bronze.
-15. **[v0.5.0]** Header is a single row: player filter dropdown left, "Scores" 10–100 stepper and Refresh right; no search bar. Status line renders small and muted; scroll arrows centered over the rows.
-16. **[v0.5.0]** Set Scores to 100 → refresh pulls up to 100 scores (status line count matches); set to 10 → 10 scores.
-17. **[v0.5.0]** With no BeatLeader mod login and no PlayerId in the config file → clear instruction message, no crash.
-18. **[v1.0.0]** Each row leads with a large "Song Name - Artist [mapper]" title (plus difficulty and stars); below it sit the avatar, a smaller player name, the score stats, and the time-ago.
-
-## Rollback
-
-Remove the mod in MBF/QuestPatcher, or delete `SnipeFeed.qmod`'s installed files via the mod manager. The mod writes only its own config file (`.../ModData/.../Configs/snipefeed.json` per config-utils) and never touches PlayerData.dat, AvatarData.dat, or settings.cfg. Previous game state is untouched.
 
 ## v1.0.0 features
 

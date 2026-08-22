@@ -64,19 +64,18 @@ namespace SnipeFeed::Format {
         return line;
     }
 
-    // The feed cell's second row: everything about the score on one line,
-    // song name first, stats spaced far enough apart to scan.
-    inline std::string InfoLine(FeedEntry const& e) {
+    // The feed cell's top row: "Song Name - Artist [mapper]" with small
+    // colored difficulty and stars at the end.
+    inline std::string TitleLine(FeedEntry const& e) {
         std::string line = e.songName;
+        if (!e.songAuthor.empty())
+            line += " <color=#BBCCDD>- " + e.songAuthor + "</color>";
+        if (!e.mapper.empty())
+            line += " <size=80%><color=#8899AA>[" + e.mapper + "]</color></size>";
         if (!e.difficulty.empty())
-            line += "   <size=80%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
+            line += "  <size=70%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
         if (e.stars > 0.0f)
-            line += std::format("   <size=80%><color=#FFB921>{:.1f}★</color></size>", e.stars);
-        line += "   <size=90%>" + FormatAcc(e.accuracy) + "</size>";
-        std::string pp = FormatPP(e.pp);
-        if (!pp.empty()) line += "   <size=90%>" + pp + "</size>";
-        if (e.fullCombo) line += "   <size=90%><color=#57FF8A>FC</color></size>";
-        if (!e.modifiers.empty()) line += "   <size=80%><color=#8899AA>+" + e.modifiers + "</color></size>";
+            line += std::format("  <size=70%><color=#FFB921>{:.1f}★</color></size>", e.stars);
         return line;
     }
 }

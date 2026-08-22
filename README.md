@@ -59,10 +59,20 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 10. **[v0.4.0]** Fast scroll up/down → no cell ever shows another row's image.
 11. **[v0.4.0]** Close and reopen the view within 2 minutes → instant load, no "Loading..." message. Press Refresh to force reload.
 12. **[v0.4.0]** Refresh with ~20 followed players completes noticeably faster than v0.3.0 (parallel fetch).
+13. **[v0.5.0]** Rows read left → right: rank number, cover art, avatar + bold player name with time-ago beside it, then one song/stats line (song · difficulty · stars · accuracy · FC), chevron at the right edge.
+14. **[v0.5.0]** All cover tiles identical size and vertically aligned; row backgrounds clearly separate entries; ranks 1–3 tinted gold/silver/bronze.
+15. **[v0.5.0]** Header shows "TOP PLAYERS" heading with the filter dropdown right-aligned on the same row; status line renders small and muted; scroll arrows centered over the rows.
 
 ## Rollback
 
 Remove the mod in MBF/QuestPatcher, or delete `SnipeFeed.qmod`'s installed files via the mod manager. The mod writes only its own config file (`.../ModData/.../Configs/snipefeed.json` per config-utils) and never touches PlayerData.dat, AvatarData.dat, or settings.cfg. Previous game state is untouched.
+
+## v0.5.0 features
+
+- **Row-based feed layout**: every score is one clean horizontal row — rank, uniform cover art, avatar + prominent player name with the time-ago right beside it, and a single info line (song name · difficulty · stars · accuracy · FC) with clear spacing between stats. A right-edge chevron marks each row as selectable.
+- **Consistent stat colors**: difficulty keeps BeatLeader's per-difficulty colors (spelled out as "Expert+"), stars yellow, accuracy orange, FC green, secondary text muted gray.
+- **Wider, denser list**: the list and header rows share one 105-unit content width, filling the previously empty horizontal space; row backgrounds are darker so entries separate visually.
+- **Header polish**: "TOP PLAYERS" heading with icon replaces the bare "Player" label, the filter dropdown right-aligns on the same row, the search field gets an icon and a readable placeholder, and refresh gets an icon (icons resolve from base-game sprites and degrade gracefully if absent).
 
 ## v0.4.0 features
 

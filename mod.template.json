@@ -4,7 +4,7 @@
   "id": "${mod_id}",
   "name": "SnipeFeed",
   "version": "${version}",
-  "author": "thejokehive",
+  "author": "NotNic",
   "modloader": "Scotland2",
   "packageId": "com.beatgames.beatsaber",
   "packageVersion": "1.40.8_7379",

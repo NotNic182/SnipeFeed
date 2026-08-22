@@ -49,9 +49,9 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 
 1. Boot game → no crash, `SnipeFeed` listed in mod logs (`qpm s log`).
 2. Main menu → Mods section shows **Snipe Feed** button.
-3. Open with empty ID → instruction text, no crash.
-4. Enter a bogus ID (e.g. `1`) → clean error message.
-5. Enter your real ID → progress text, then feed sorted newest-first.
+3. Open while logged into the BeatLeader mod → friends feed loads, no crash.
+4. **[changed in v0.5.0]** No login + bogus `PlayerId` in the config file (e.g. `1`) → clean error message.
+5. **[changed in v0.5.0]** No login + your real `PlayerId` in the config file → progress text, then feed sorted newest-first.
 6. Airplane-mode the headset → Refresh shows network error, gameplay unaffected.
 7. Enter/exit a song, reopen feed → still works (no duplicate UI).
 8. **[v0.4.0]** Open Snipe Feed → cards render with cover art (left), avatar + player name + time (center), song title + colored difficulty + stars, colored stats.
@@ -59,9 +59,11 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 10. **[v0.4.0]** Fast scroll up/down → no cell ever shows another row's image.
 11. **[v0.4.0]** Close and reopen the view within 2 minutes → instant load, no "Loading..." message. Press Refresh to force reload.
 12. **[v0.4.0]** Refresh with ~20 followed players completes noticeably faster than v0.3.0 (parallel fetch).
-13. **[v0.5.0]** Rows read left → right: rank number, cover art, avatar + bold player name with time-ago beside it, then one song/stats line (song · difficulty · stars · accuracy · FC), chevron at the right edge.
+13. **[v0.5.0]** Rows read left → right: rank number, cover art, avatar + bold player name (visible!) with time-ago beside it, then one song/stats line (song · difficulty · stars · accuracy · FC), chevron at the right edge.
 14. **[v0.5.0]** All cover tiles identical size and vertically aligned; row backgrounds clearly separate entries; ranks 1–3 tinted gold/silver/bronze.
-15. **[v0.5.0]** Header shows "TOP PLAYERS" heading with the filter dropdown right-aligned on the same row; status line renders small and muted; scroll arrows centered over the rows.
+15. **[v0.5.0]** Header is a single row: player filter dropdown left, "Scores" 10–100 stepper and Refresh right; no search bar. Status line renders small and muted; scroll arrows centered over the rows.
+16. **[v0.5.0]** Set Scores to 100 → refresh pulls up to 100 scores (status line count matches); set to 10 → 10 scores.
+17. **[v0.5.0]** With no BeatLeader mod login and no PlayerId in the config file → clear instruction message, no crash.
 
 ## Rollback
 
@@ -69,10 +71,11 @@ Remove the mod in MBF/QuestPatcher, or delete `SnipeFeed.qmod`'s installed files
 
 ## v0.5.0 features
 
-- **Row-based feed layout**: every score is one clean horizontal row — rank, uniform cover art, avatar + prominent player name with the time-ago right beside it, and a single info line (song name · difficulty · stars · accuracy · FC) with clear spacing between stats. A right-edge chevron marks each row as selectable.
+- **Row-based feed layout**: every score is one clean horizontal row — rank, uniform cover art, avatar + prominent player name with the time-ago right beside it, and a single info line (song name · difficulty · stars · accuracy · FC) with clear spacing between stats. A right-edge chevron marks each row as selectable. Fixes the v0.4.0 bug where the player name never rendered (the name line was vertically ellipsized away by its own row height).
 - **Consistent stat colors**: difficulty keeps BeatLeader's per-difficulty colors (spelled out as "Expert+"), stars yellow, accuracy orange, FC green, secondary text muted gray.
-- **Wider, denser list**: the list and header rows share one 105-unit content width, filling the previously empty horizontal space; row backgrounds are darker so entries separate visually.
-- **Header polish**: "TOP PLAYERS" heading with icon replaces the bare "Player" label, the filter dropdown right-aligns on the same row, the search field gets an icon and a readable placeholder, and refresh gets an icon (icons resolve from base-game sprites and degrade gracefully if absent).
+- **Adjustable feed size**: a "Scores" stepper (10–100, default 50) controls how many scores a refresh pulls on both the friends-feed and public-API paths.
+- **Simplified header**: the ID search bar is gone — the feed uses the BeatLeader mod login on the headset (`PlayerId` in the config file remains as a fallback for the public API). One control row holds the player filter dropdown, the Scores stepper, and Refresh; the redundant heading label is gone too.
+- **Wider, denser list**: the list and header rows share one 105-unit content width, filling the previously empty horizontal space; row backgrounds are darker so entries separate visually; status line is small muted secondary text; scroll arrows centered over the rows.
 
 ## v0.4.0 features
 

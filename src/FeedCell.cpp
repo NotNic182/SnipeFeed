@@ -26,7 +26,7 @@ namespace {
     <vertical spacing='0' pref-width='77' flexible-width='1000' child-expand-height='false' child-control-height='true'>
         <horizontal spacing='1.5' pref-height='5.5' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
             <image id='avatarImage' pref-width='4.5' pref-height='4.5' preserve-aspect='true'/>
-            <text id='playerText' font-size='4' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
+            <text id='playerText' font-size='4' align='MidlineLeft' word-wrapping='false'/>
             <text id='timeText' font-size='2.8' color='#8899AA' align='MidlineLeft' word-wrapping='false' flexible-width='1000'/>
         </horizontal>
         <text id='infoText' font-size='3.2' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>

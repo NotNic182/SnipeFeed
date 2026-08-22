@@ -1,4 +1,4 @@
-#include "FeedViewController.hpp"
+#include "FeedView.hpp"
 #include "Feed.hpp"
 #include "FeedCell.hpp"
 #include "Format.hpp"
@@ -18,7 +18,7 @@
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
 #include "HMUI/ScrollView.hpp"
-#include "HMUI/Touchable.hpp"
+#include "HMUI/ViewController.hpp"
 #include "UnityEngine/Color.hpp"
 #include "UnityEngine/GameObject.hpp"
 #include "UnityEngine/Object.hpp"
@@ -35,13 +35,14 @@
 #include <ctime>
 #include <format>
 
-DEFINE_TYPE(SnipeFeed, FeedViewController);
+DEFINE_TYPE(SnipeFeed, FeedView);
 
 using namespace SnipeFeed;
 
 namespace {
-    // Plain data, deliberately file-static: it survives BSML re-creating the
-    // view, which is what lets the feed persist across menu visits.
+    // Plain data, deliberately file-static: it survives the tab GameObject
+    // being recreated, which is what lets the feed persist across menu
+    // visits.
     struct FeedState {
         std::atomic<int> refreshGeneration{0};
         std::atomic<bool> refreshInFlight{false};
@@ -59,30 +60,22 @@ namespace {
     constexpr auto FILTER_ALL = "All players";
     constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
 
-    // Shared width for the header rows, the status line, and the list, so
-    // everything lines up on the same left/right edges.
-    constexpr float CONTENT_WIDTH = 105.0f;
-
-    // Base-game sprite lookup. Sprite names vary between game versions, so
-    // each icon has fallback candidates and simply stays absent if none of
-    // them exist — the layout must read fine without it.
-    UnityEngine::Sprite* FindIcon(std::initializer_list<char const*> names) {
-        for (auto name : names)
-            if (auto sprite = BSML::Utilities::FindSpriteCached(name)) return sprite;
-        return nullptr;
-    }
-
-    void AddIcon(UnityEngine::Transform* parent, UnityEngine::Sprite* sprite, float size) {
-        if (!sprite) return;
-        auto icon = BSML::Lite::CreateImage(parent, sprite, {0.0f, 0.0f}, {size, size});
-        auto element = icon->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        element->set_preferredWidth(size);
-        element->set_preferredHeight(size);
-        icon->set_preserveAspect(true);
-    }
+    // Shared width for the header row, the status line, and the list, so
+    // everything lines up on the same left/right edges. The gameplay setup
+    // panel's tab area is far smaller than a full screen (Qounters++ sizes
+    // its rows to 85 units there), so everything below is sized to fit
+    // roughly 90x46.
+    constexpr float CONTENT_WIDTH = 88.0f;
+    constexpr float LIST_HEIGHT = 34.0f;
 }
 
-void FeedViewController::RebuildFilter() {
+void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActivation) {
+    auto view = gameObject->GetComponent<FeedView*>();
+    if (!view) view = gameObject->AddComponent<FeedView*>();
+    view->DidActivate(firstActivation);
+}
+
+void FeedView::RebuildFilter() {
     if (!filterContainer) return;
 
     for (int i = filterContainer->get_childCount() - 1; i >= 0; i--)
@@ -106,7 +99,7 @@ void FeedViewController::RebuildFilter() {
     });
 }
 
-void FeedViewController::RebuildList() {
+void FeedView::RebuildList() {
     if (!listData || !listData->tableView) return;
 
     state.visible.clear();
@@ -129,18 +122,18 @@ void FeedViewController::RebuildList() {
     }
 }
 
-HMUI::TableCell* FeedViewController::CellForIdx(HMUI::TableView* tableView, int idx) {
+HMUI::TableCell* FeedView::CellForIdx(HMUI::TableView* tableView, int idx) {
     auto cell = FeedCell::GetCell(tableView);
     if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
         cell->SetData(state.entries[state.visible[idx]], idx + 1);
     return cell;
 }
 
-float FeedViewController::CellSize() { return FeedCell::CELL_HEIGHT; }
+float FeedView::CellSize() { return FeedCell::CELL_HEIGHT; }
 
-int FeedViewController::NumberOfCells() { return static_cast<int>(state.visible.size()); }
+int FeedView::NumberOfCells() { return static_cast<int>(state.visible.size()); }
 
-void FeedViewController::OnCellClicked(int listIdx) {
+void FeedView::OnCellClicked(int listIdx) {
     if (listData && listData->tableView)
         listData->tableView->ClearSelection();
     if (listIdx < 0 || listIdx >= static_cast<int>(state.visible.size())) return;
@@ -174,7 +167,7 @@ void FeedViewController::OnCellClicked(int listIdx) {
         modalAvatar->set_sprite(nullptr);
         modalAvatar->set_color({1.0f, 1.0f, 1.0f, 0.15f});
     }
-    auto weakSelf = UnityW<FeedViewController>(this);
+    auto weakSelf = UnityW<FeedView>(this);
     if (!e.coverUrl.empty()) {
         SpriteCache::GetSprite(e.coverUrl, [weakSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
             if (!weakSelf || !weakSelf->modalCover) return;
@@ -207,28 +200,33 @@ void FeedViewController::OnCellClicked(int listIdx) {
         detailModal->Show();
 }
 
-void FeedViewController::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
+void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     if (!level) return;
     if (detailModal) detailModal->Hide();
 
-    // Our view lives inside a BSML-presented flow coordinator; dismiss it
-    // first so the real main menu (and its Solo button) is visible again.
+    // Prime the solo flow coordinator with our level while it is still
+    // active — after the dismissal below it can no longer be found.
+    if (!Installer::PrimeSoloFlow(level)) return;
+
+    // Our tab lives in the gameplay setup panel inside the solo song
+    // selection flow. Back out to the main menu first, then press the real
+    // Solo button so the game re-enters song selection with our level up.
     auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
     HMUI::FlowCoordinator* youngest = mainFC->YoungestChildFlowCoordinatorOrSelf();
     if (youngest && youngest != static_cast<HMUI::FlowCoordinator*>(mainFC) && youngest->_parentFlowCoordinator) {
         HMUI::FlowCoordinator* parent = youngest->_parentFlowCoordinator;
         parent->DismissFlowCoordinator(
             youngest, HMUI::ViewController::AnimationDirection::Horizontal,
-            BSML::MakeSystemAction([level]() {
-                Installer::OpenLevel(level);
+            BSML::MakeSystemAction([]() {
+                Installer::PressSoloButton();
             }),
             false);
     } else {
-        Installer::OpenLevel(level);
+        Installer::PressSoloButton();
     }
 }
 
-void FeedViewController::PlaySelected() {
+void FeedView::PlaySelected() {
     if (state.busyPlaying) return;
     if (state.selected < 0 || state.selected >= static_cast<int>(state.entries.size())) return;
     auto entry = state.entries[state.selected];
@@ -243,7 +241,7 @@ void FeedViewController::PlaySelected() {
     if (playButton) playButton->set_interactable(false);
     if (playButtonText) playButtonText->set_text("Downloading...");
 
-    auto weakSelf = UnityW<FeedViewController>(this);
+    auto weakSelf = UnityW<FeedView>(this);
     Installer::DownloadAndInstallAsync(entry.songHash, [weakSelf, entry](bool success, std::string error) {
         BSML::MainThreadScheduler::Schedule([weakSelf, entry, success, error = std::move(error)] {
             if (!success) {
@@ -280,7 +278,7 @@ void FeedViewController::PlaySelected() {
     });
 }
 
-void FeedViewController::Refresh() {
+void FeedView::Refresh() {
     if (state.refreshInFlight.load()) {
         // A fetch from a previous (possibly destroyed) view is still running.
         // Give a freshly recreated view something other than a blank screen
@@ -293,7 +291,7 @@ void FeedViewController::Refresh() {
 
     state.refreshInFlight.store(true);
     int generation = ++state.refreshGeneration;
-    auto weakSelf = UnityW<FeedViewController>(this);
+    auto weakSelf = UnityW<FeedView>(this);
 
     if (statusText) statusText->set_text("Loading...");
 
@@ -355,144 +353,141 @@ void FeedViewController::Refresh() {
         });
 }
 
-void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy, bool screenSystemEnabling) {
-    if (firstActivation) {
-        get_gameObject()->AddComponent<HMUI::Touchable*>();
+void FeedView::BuildUI() {
+    auto self = this;
 
-        auto self = this;
+    // Vertical stack pinned to the TOP of the tab area so it grows downward.
+    auto root = BSML::Lite::CreateVerticalLayoutGroup(get_transform());
+    root->set_childControlWidth(true);
+    root->set_childControlHeight(true);
+    root->set_childForceExpandWidth(false);
+    root->set_childForceExpandHeight(false);
+    root->set_childAlignment(UnityEngine::TextAnchor::UpperCenter);
+    root->set_spacing(0.5f);
+    auto rootFitter = root->get_gameObject()->AddComponent<UnityEngine::UI::ContentSizeFitter*>();
+    rootFitter->set_verticalFit(UnityEngine::UI::ContentSizeFitter::FitMode::PreferredSize);
+    auto rootRect = root->GetComponent<UnityEngine::RectTransform*>();
+    rootRect->set_anchorMin({0.5f, 1.0f});
+    rootRect->set_anchorMax({0.5f, 1.0f});
+    rootRect->set_pivot({0.5f, 1.0f});
+    rootRect->set_anchoredPosition({0.0f, 0.0f});
+    auto parent = root->get_transform();
 
-        // Vertical stack pinned to the TOP of the view so it grows downward.
-        // (Centered + ContentSizeFitter overflowed above the screen panel.)
-        auto root = BSML::Lite::CreateVerticalLayoutGroup(get_transform());
-        root->set_childControlWidth(true);
-        root->set_childControlHeight(true);
-        root->set_childForceExpandWidth(false);
-        root->set_childForceExpandHeight(false);
-        root->set_childAlignment(UnityEngine::TextAnchor::UpperCenter);
-        root->set_spacing(0.5f);
-        auto rootFitter = root->get_gameObject()->AddComponent<UnityEngine::UI::ContentSizeFitter*>();
-        rootFitter->set_verticalFit(UnityEngine::UI::ContentSizeFitter::FitMode::PreferredSize);
-        auto rootRect = root->GetComponent<UnityEngine::RectTransform*>();
-        rootRect->set_anchorMin({0.5f, 1.0f});
-        rootRect->set_anchorMax({0.5f, 1.0f});
-        rootRect->set_pivot({0.5f, 1.0f});
-        rootRect->set_anchoredPosition({0.0f, 0.0f});
-        auto parent = root->get_transform();
+    // Single control row: player filter dropdown on the left, scores-to-
+    // pull setting and refresh on the right.
+    auto topRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
+    topRow->set_childControlWidth(true);
+    topRow->set_childControlHeight(true);
+    topRow->set_childForceExpandWidth(false);
+    topRow->set_childAlignment(UnityEngine::TextAnchor::MiddleLeft);
+    topRow->set_spacing(1.0f);
+    auto topRowElement = topRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    topRowElement->set_preferredWidth(CONTENT_WIDTH);
 
-        // Single control row: player filter dropdown on the left, scores-to-
-        // pull setting and refresh on the right. No search bar — the feed
-        // comes from the BeatLeader mod login on this headset (the PlayerId
-        // config value remains as a file-only fallback for the public API).
-        auto topRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
-        topRow->set_childControlWidth(true);
-        topRow->set_childControlHeight(true);
-        topRow->set_childForceExpandWidth(false);
-        topRow->set_childAlignment(UnityEngine::TextAnchor::MiddleLeft);
-        topRow->set_spacing(1.5f);
-        auto topRowElement = topRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        topRowElement->set_preferredWidth(CONTENT_WIDTH);
+    // Filter dropdown holder (dropdown recreated after each refresh);
+    // flexes so the remaining controls land on the row's right edge.
+    auto filterHolder = BSML::Lite::CreateHorizontalLayoutGroup(topRow->get_transform());
+    filterHolder->set_childControlWidth(true);
+    filterHolder->set_childControlHeight(true);
+    filterHolder->set_childForceExpandWidth(false);
+    auto filterElement = filterHolder->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    filterElement->set_preferredWidth(34.0f);
+    filterElement->set_flexibleWidth(1000.0f);
+    filterContainer = filterHolder->get_transform();
 
-        // Filter dropdown holder (dropdown recreated after each refresh);
-        // flexes so the remaining controls land on the row's right edge.
-        auto filterHolder = BSML::Lite::CreateHorizontalLayoutGroup(topRow->get_transform());
-        filterHolder->set_childControlWidth(true);
-        filterHolder->set_childControlHeight(true);
-        filterHolder->set_childForceExpandWidth(false);
-        auto filterElement = filterHolder->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        filterElement->set_preferredWidth(45.0f);
-        filterElement->set_flexibleWidth(1000.0f);
-        filterContainer = filterHolder->get_transform();
-
-        auto countSetting = BSML::Lite::CreateIncrementSetting(topRow->get_transform(), "Scores", 0, 10.0f,
-            static_cast<float>(std::clamp(getModConfig().FeedCount.GetValue(), 10, 100)), 10.0f, 100.0f,
-            [](float value) {
-                getModConfig().FeedCount.SetValue(static_cast<int>(value));
-            });
-        auto countElement = countSetting->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        countElement->set_preferredWidth(38.0f);
-
-        AddIcon(topRow->get_transform(), FindIcon({"RefreshIcon", "RestartIcon", "SyncIcon"}), 3.5f);
-        BSML::Lite::CreateUIButton(topRow->get_transform(), "Refresh", [self]() {
-            self->Refresh();
+    auto countSetting = BSML::Lite::CreateIncrementSetting(topRow->get_transform(), "Scores", 0, 10.0f,
+        static_cast<float>(std::clamp(getModConfig().FeedCount.GetValue(), 10, 100)), 10.0f, 100.0f,
+        [](float value) {
+            getModConfig().FeedCount.SetValue(static_cast<int>(value));
         });
+    auto countElement = countSetting->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    countElement->set_preferredWidth(34.0f);
 
-        // Secondary info line: small and muted so the score rows below stay
-        // the visual focus.
-        statusText = BSML::Lite::CreateText(parent, "");
-        statusText->set_fontSize(2.6f);
-        statusText->set_color({0.62f, 0.68f, 0.76f, 1.0f});
-        statusText->set_alignment(TMPro::TextAlignmentOptions::Center);
-        auto statusElement = statusText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        statusElement->set_preferredWidth(CONTENT_WIDTH);
-        statusElement->set_preferredHeight(4.0f);
+    BSML::Lite::CreateUIButton(topRow->get_transform(), "Refresh", [self]() {
+        self->Refresh();
+    });
 
-        // The scrollable list carries its own LayoutElement sized from the
-        // sizeDelta we pass, so it slots into the stack as a normal child.
-        // CreateScrollableList wires onCellWithIdxClicked to the TableView's
-        // own didSelectCellWithIdxEvent (a field on HMUI::TableView itself,
-        // confirmed via extern/includes/bs-cordl/include/HMUI/zzzz__TableView_def.hpp
-        // — offset 0x50, independent of _dataSource). That event fires
-        // whenever a cell reports selection regardless of which IDataSource
-        // is installed, so swapping SetDataSource below does not disturb it
-        // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
-        listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, 52.0f}, [self](int idx) {
-            self->OnCellClicked(idx);
-        });
-        listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
+    // Secondary info line: small and muted so the score rows below stay
+    // the visual focus.
+    statusText = BSML::Lite::CreateText(parent, "");
+    statusText->set_fontSize(2.4f);
+    statusText->set_color({0.62f, 0.68f, 0.76f, 1.0f});
+    statusText->set_alignment(TMPro::TextAlignmentOptions::Center);
+    auto statusElement = statusText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    statusElement->set_preferredWidth(CONTENT_WIDTH);
+    statusElement->set_preferredHeight(3.5f);
 
-        // Center the page up/down arrows over the rows; stock placement
-        // leaves them offset to one side of the viewport.
-        if (auto scrollView = listData->tableView->_scrollView) {
-            for (auto button : {scrollView->_pageUpButton, scrollView->_pageDownButton}) {
-                if (!button) continue;
-                auto rect = button->GetComponent<UnityEngine::RectTransform*>();
-                rect->set_anchoredPosition({0.0f, rect->get_anchoredPosition().y});
-            }
+    // The scrollable list carries its own LayoutElement sized from the
+    // sizeDelta we pass, so it slots into the stack as a normal child.
+    // CreateScrollableList wires onCellWithIdxClicked to the TableView's
+    // own didSelectCellWithIdxEvent (a field on HMUI::TableView itself,
+    // confirmed via extern/includes/bs-cordl/include/HMUI/zzzz__TableView_def.hpp
+    // — offset 0x50, independent of _dataSource). That event fires
+    // whenever a cell reports selection regardless of which IDataSource
+    // is installed, so swapping SetDataSource below does not disturb it
+    // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
+    listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, LIST_HEIGHT}, [self](int idx) {
+        self->OnCellClicked(idx);
+    });
+    listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
+
+    // Center the page up/down arrows over the rows; stock placement
+    // leaves them offset to one side of the viewport.
+    if (auto scrollView = listData->tableView->_scrollView) {
+        for (auto button : {scrollView->_pageUpButton, scrollView->_pageDownButton}) {
+            if (!button) continue;
+            auto rect = button->GetComponent<UnityEngine::RectTransform*>();
+            rect->set_anchoredPosition({0.0f, rect->get_anchoredPosition().y});
         }
-
-        // Detail modal: cover art + song text on top, avatar + player row,
-        // stats, then the play button. Same data as before, card look.
-        detailModal = BSML::Lite::CreateModal(get_transform(), {90.0f, 52.0f}, nullptr, true);
-        auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
-        modalLayout->set_childControlWidth(true);
-        modalLayout->set_childControlHeight(true);
-        modalLayout->set_childForceExpandWidth(true);
-        modalLayout->set_childForceExpandHeight(false);
-        modalLayout->set_spacing(1.5f);
-        modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(3, 3, 3, 3));
-
-        auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
-        coverRow->set_childControlWidth(true);
-        coverRow->set_childControlHeight(true);
-        coverRow->set_childForceExpandWidth(false);
-        coverRow->set_spacing(3.0f);
-        modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {20.0f, 20.0f});
-        auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        coverElement->set_preferredWidth(20.0f);
-        coverElement->set_preferredHeight(20.0f);
-        modalCover->set_preserveAspect(true);
-        detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
-        detailText->set_fontSize(3.5f);
-        detailText->set_enableWordWrapping(true);
-
-        auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
-        playerRow->set_childControlWidth(true);
-        playerRow->set_childControlHeight(true);
-        playerRow->set_childForceExpandWidth(false);
-        playerRow->set_spacing(1.5f);
-        modalAvatar = BSML::Lite::CreateImage(playerRow->get_transform(), nullptr, {0.0f, 0.0f}, {4.0f, 4.0f});
-        auto avatarElement = modalAvatar->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        avatarElement->set_preferredWidth(4.0f);
-        avatarElement->set_preferredHeight(4.0f);
-        modalAvatar->set_preserveAspect(true);
-        modalPlayerText = BSML::Lite::CreateText(playerRow->get_transform(), "");
-        modalPlayerText->set_fontSize(3.2f);
-
-        playButton = BSML::Lite::CreateUIButton(modalLayout->get_transform(), "Play", [self]() {
-            self->PlaySelected();
-        });
-        playButtonText = playButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
     }
+
+    // Detail modal: cover art + song text on top, avatar + player row,
+    // stats, then the play button. Sized to stay inside the gameplay
+    // setup panel.
+    detailModal = BSML::Lite::CreateModal(get_transform(), {76.0f, 46.0f}, nullptr, true);
+    auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
+    modalLayout->set_childControlWidth(true);
+    modalLayout->set_childControlHeight(true);
+    modalLayout->set_childForceExpandWidth(true);
+    modalLayout->set_childForceExpandHeight(false);
+    modalLayout->set_spacing(1.0f);
+    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(2, 2, 2, 2));
+
+    auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
+    coverRow->set_childControlWidth(true);
+    coverRow->set_childControlHeight(true);
+    coverRow->set_childForceExpandWidth(false);
+    coverRow->set_spacing(2.0f);
+    modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {16.0f, 16.0f});
+    auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    coverElement->set_preferredWidth(16.0f);
+    coverElement->set_preferredHeight(16.0f);
+    modalCover->set_preserveAspect(true);
+    detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
+    detailText->set_fontSize(3.0f);
+    detailText->set_enableWordWrapping(true);
+
+    auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
+    playerRow->set_childControlWidth(true);
+    playerRow->set_childControlHeight(true);
+    playerRow->set_childForceExpandWidth(false);
+    playerRow->set_spacing(1.5f);
+    modalAvatar = BSML::Lite::CreateImage(playerRow->get_transform(), nullptr, {0.0f, 0.0f}, {4.0f, 4.0f});
+    auto avatarElement = modalAvatar->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    avatarElement->set_preferredWidth(4.0f);
+    avatarElement->set_preferredHeight(4.0f);
+    modalAvatar->set_preserveAspect(true);
+    modalPlayerText = BSML::Lite::CreateText(playerRow->get_transform(), "");
+    modalPlayerText->set_fontSize(3.0f);
+
+    playButton = BSML::Lite::CreateUIButton(modalLayout->get_transform(), "Play", [self]() {
+        self->PlaySelected();
+    });
+    playButtonText = playButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
+}
+
+void FeedView::DidActivate(bool firstActivation) {
+    if (!listData) BuildUI();
 
     bool stale = state.entries.empty()
         || (static_cast<long long>(std::time(nullptr)) - state.lastFetchTime) > REFRESH_MAX_AGE_SECONDS;

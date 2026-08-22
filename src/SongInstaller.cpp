@@ -103,14 +103,16 @@ namespace SnipeFeed::Installer {
         worker.detach();
     }
 
-    // Mirrors BeatLeader's MapDownloadDialog::OpenMap for our stack: prime the
-    // solo flow coordinator with the level, then press the real Solo button.
-    void OpenLevel(GlobalNamespace::BeatmapLevel* level) {
-        if (level == nullptr) return;
+    // Mirrors BeatLeader's MapDownloadDialog::OpenMap for our stack, split in
+    // two: priming must happen while the solo flow coordinator is still
+    // active (FindObjectOfType only sees active objects), pressing the Solo
+    // button only works once the main menu is visible again.
+    bool PrimeSoloFlow(GlobalNamespace::BeatmapLevel* level) {
+        if (level == nullptr) return false;
 
         auto customLevelsPack = SongCore::API::Loading::GetCustomLevelPack();
-        if (customLevelsPack == nullptr) return;
-        if (customLevelsPack->_beatmapLevels->get_Length() == 0) return;
+        if (customLevelsPack == nullptr) return false;
+        if (customLevelsPack->_beatmapLevels->get_Length() == 0) return false;
 
         auto levelCategory = System::Nullable_1<SelectLevelCategoryViewController::LevelCategory>();
         levelCategory.value = SelectLevelCategoryViewController::LevelCategory(SelectLevelCategoryViewController::LevelCategory::All);
@@ -122,17 +124,21 @@ namespace SnipeFeed::Installer {
         auto soloFlowCoordinator = UnityEngine::Object::FindObjectOfType<SoloFreePlayFlowCoordinator*>();
         if (!soloFlowCoordinator) {
             SnipeFeedLogger.error("SoloFreePlayFlowCoordinator not found");
-            return;
+            return false;
         }
         soloFlowCoordinator->Setup(state);
+        return true;
+    }
 
+    bool PressSoloButton() {
         SafePtrUnity<UnityEngine::GameObject> songSelectButton = UnityEngine::GameObject::Find("SoloButton").unsafePtr();
         if (!songSelectButton)
             songSelectButton = UnityEngine::GameObject::Find("Wrapper/BeatmapWithModifiers/BeatmapSelection/EditButton");
         if (!songSelectButton) {
             SnipeFeedLogger.error("Could not find the solo menu button to press");
-            return;
+            return false;
         }
         songSelectButton->GetComponent<HMUI::NoTransitionsButton*>()->Press();
+        return true;
     }
 }

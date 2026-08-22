@@ -9,8 +9,9 @@
 #include <string>
 
 // Text formatting shared by the feed cells and the detail modal.
-// Colors and the accuracy gradient match the official BeatLeader mod
-// (references/beatleader-qmod/include/Utils/FormatUtils.hpp).
+// Difficulty colors match the official BeatLeader mod; stat colors are
+// fixed per stat (stars yellow, accuracy orange, FC green) so rows scan
+// consistently.
 namespace SnipeFeed::Format {
 
     inline std::string TimeAgo(long long timepost) {
@@ -33,21 +34,11 @@ namespace SnipeFeed::Format {
     }
 
     inline std::string DiffLabel(std::string const& diff) {
-        return diff == "ExpertPlus" ? "Ex+" : diff;
-    }
-
-    // BeatLeader's accuracy color: lerp #EEFF9E -> #FF6347 by pow(acc, 14).
-    inline std::string AccColorHex(float acc) {
-        float t = std::pow(std::clamp(acc, 0.0f, 1.0f), 14.0f);
-        auto lerp = [](float a, float b, float t) { return a + (b - a) * t; };
-        int r = static_cast<int>(std::lround(lerp(0.93f, 1.00f, t) * 255));
-        int g = static_cast<int>(std::lround(lerp(1.00f, 0.39f, t) * 255));
-        int b = static_cast<int>(std::lround(lerp(0.62f, 0.28f, t) * 255));
-        return std::format("#{:02X}{:02X}{:02X}", r, g, b);
+        return diff == "ExpertPlus" ? "Expert+" : diff;
     }
 
     inline std::string FormatAcc(float acc) {
-        return std::format("<color={}>{:.2f}%</color>", AccColorHex(acc), acc * 100.0f);
+        return std::format("<color=#FF8C29>{:.2f}%</color>", acc * 100.0f);
     }
 
     inline std::string FormatPP(float pp) {
@@ -70,6 +61,22 @@ namespace SnipeFeed::Format {
         if (!pp.empty()) line += "  " + pp;
         if (e.fullCombo) line += "  <color=#57FF8A>FC</color>";
         if (!e.modifiers.empty()) line += "  <color=#999999>+" + e.modifiers + "</color>";
+        return line;
+    }
+
+    // The feed cell's second row: everything about the score on one line,
+    // song name first, stats spaced far enough apart to scan.
+    inline std::string InfoLine(FeedEntry const& e) {
+        std::string line = e.songName;
+        if (!e.difficulty.empty())
+            line += "   <size=80%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
+        if (e.stars > 0.0f)
+            line += std::format("   <size=80%><color=#FFB921>{:.1f}★</color></size>", e.stars);
+        line += "   <size=90%>" + FormatAcc(e.accuracy) + "</size>";
+        std::string pp = FormatPP(e.pp);
+        if (!pp.empty()) line += "   <size=90%>" + pp + "</size>";
+        if (e.fullCombo) line += "   <size=90%><color=#57FF8A>FC</color></size>";
+        if (!e.modifiers.empty()) line += "   <size=80%><color=#8899AA>+" + e.modifiers + "</color></size>";
         return line;
     }
 }

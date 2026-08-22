@@ -247,10 +247,14 @@ namespace SnipeFeed {
         std::string playerInput,
         int maxPlayers,
         int scoresPerPlayer,
+        int feedCount,
         std::function<void(std::string)> onProgress,
         std::function<void(FeedResult)> onDone) {
 
-        std::thread worker([playerInput = std::move(playerInput), maxPlayers, scoresPerPlayer,
+        // 100 is the largest page BeatLeader serves per request.
+        feedCount = std::clamp(feedCount, 10, 100);
+
+        std::thread worker([playerInput = std::move(playerInput), maxPlayers, scoresPerPlayer, feedCount,
                             onProgress = std::move(onProgress), onDone = std::move(onDone)] {
             FeedResult result;
 
@@ -259,7 +263,7 @@ namespace SnipeFeed {
             std::error_code fsError;
             if (std::filesystem::exists(cookieFile, fsError)) {
                 if (onProgress) onProgress("Loading your BeatLeader friends feed...");
-                if (TryFetchFriendScores(cookieFile, std::clamp(maxPlayers * scoresPerPlayer, 20, 50), result.entries)) {
+                if (TryFetchFriendScores(cookieFile, feedCount, result.entries)) {
                     std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
                         return a.timepost > b.timepost;
                     });
@@ -270,10 +274,10 @@ namespace SnipeFeed {
                 result.entries.clear();
             }
 
-            // Path 2: public API using the entered ID or alias.
+            // Path 2: public API using the configured ID or alias.
             std::string input = SanitizeInput(playerInput);
             if (input.empty()) {
-                result.error = "Couldn't use a BeatLeader mod login on this headset.\nEnter your BeatLeader ID or alias above and press Refresh.";
+                result.error = "Couldn't use a BeatLeader mod login on this headset.\nLog into the BeatLeader mod, then press Refresh.\n(Or set PlayerId in SnipeFeed's config file to use the public API.)";
                 onDone(std::move(result));
                 return;
             }
@@ -324,6 +328,8 @@ namespace SnipeFeed {
             std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
                 return a.timepost > b.timepost;
             });
+            if (result.entries.size() > static_cast<size_t>(feedCount))
+                result.entries.resize(feedCount);
 
             if (result.entries.empty()) {
                 result.error = "No recent scores found for the players you follow.";

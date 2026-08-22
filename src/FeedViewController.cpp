@@ -11,12 +11,16 @@
 #include "bsml/shared/BSML/MainThreadScheduler.hpp"
 #include "bsml/shared/Helpers/delegates.hpp"
 #include "bsml/shared/Helpers/getters.hpp"
+#include "bsml/shared/Helpers/utilities.hpp"
 
 #include "songcore/shared/SongCore.hpp"
 
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
+#include "HMUI/InputFieldView.hpp"
+#include "HMUI/ScrollView.hpp"
 #include "HMUI/Touchable.hpp"
+#include "UnityEngine/Color.hpp"
 #include "UnityEngine/GameObject.hpp"
 #include "UnityEngine/Object.hpp"
 #include "TMPro/TextAlignmentOptions.hpp"
@@ -55,6 +59,28 @@ namespace {
 
     constexpr auto FILTER_ALL = "All players";
     constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
+
+    // Shared width for the header rows, the status line, and the list, so
+    // everything lines up on the same left/right edges.
+    constexpr float CONTENT_WIDTH = 105.0f;
+
+    // Base-game sprite lookup. Sprite names vary between game versions, so
+    // each icon has fallback candidates and simply stays absent if none of
+    // them exist — the layout must read fine without it.
+    UnityEngine::Sprite* FindIcon(std::initializer_list<char const*> names) {
+        for (auto name : names)
+            if (auto sprite = BSML::Utilities::FindSpriteCached(name)) return sprite;
+        return nullptr;
+    }
+
+    void AddIcon(UnityEngine::Transform* parent, UnityEngine::Sprite* sprite, float size) {
+        if (!sprite) return;
+        auto icon = BSML::Lite::CreateImage(parent, sprite, {0.0f, 0.0f}, {size, size});
+        auto element = icon->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        element->set_preferredWidth(size);
+        element->set_preferredHeight(size);
+        icon->set_preserveAspect(true);
+    }
 }
 
 void FeedViewController::RebuildFilter() {
@@ -72,7 +98,9 @@ void FeedViewController::RebuildFilter() {
     std::string current = state.playerFilter.empty() ? FILTER_ALL : state.playerFilter;
 
     auto self = this;
-    BSML::Lite::CreateDropdown(filterContainer, "Player", current, views, [self](StringW value) {
+    // Empty label: the heading row already says what the list is, the
+    // dropdown only needs to show the current choice.
+    BSML::Lite::CreateDropdown(filterContainer, "", current, views, [self](StringW value) {
         std::string selected = static_cast<std::string>(value);
         state.playerFilter = (selected == FILTER_ALL) ? "" : selected;
         self->RebuildList();
@@ -105,7 +133,7 @@ void FeedViewController::RebuildList() {
 HMUI::TableCell* FeedViewController::CellForIdx(HMUI::TableView* tableView, int idx) {
     auto cell = FeedCell::GetCell(tableView);
     if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
-        cell->SetData(state.entries[state.visible[idx]]);
+        cell->SetData(state.entries[state.visible[idx]], idx + 1);
     return cell;
 }
 
@@ -347,38 +375,69 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
         rootRect->set_anchoredPosition({0.0f, 0.0f});
         auto parent = root->get_transform();
 
-        // Row 1: ID input + refresh.
+        // Row 1: search icon + ID input + refresh.
         auto topRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
         topRow->set_childControlWidth(true);
         topRow->set_childControlHeight(true);
         topRow->set_childForceExpandWidth(false);
-        topRow->set_spacing(2.0f);
+        topRow->set_childAlignment(UnityEngine::TextAnchor::MiddleLeft);
+        topRow->set_spacing(1.5f);
+        auto topRowElement = topRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        topRowElement->set_preferredWidth(CONTENT_WIDTH);
+        AddIcon(topRow->get_transform(), FindIcon({"SearchIcon", "MagnifyingGlassIcon"}), 4.0f);
         auto input = BSML::Lite::CreateStringSetting(topRow->get_transform(), "BeatLeader ID or alias", getModConfig().PlayerId.GetValue(),
             [](StringW value) {
                 getModConfig().PlayerId.SetValue(static_cast<std::string>(value));
             });
         auto inputElement = input->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        inputElement->set_preferredWidth(70.0f);
+        inputElement->set_preferredWidth(74.0f);
+        // Flex so the refresh button lands on the row's right edge.
+        inputElement->set_flexibleWidth(1000.0f);
+        // The setting's label doubles as the empty-field placeholder; the
+        // stock color is too dim to read at menu distance.
+        if (input->_placeholderText) {
+            if (auto placeholder = input->_placeholderText->GetComponent<TMPro::TextMeshProUGUI*>())
+                placeholder->set_color({0.72f, 0.78f, 0.86f, 1.0f});
+        }
 
+        AddIcon(topRow->get_transform(), FindIcon({"RefreshIcon", "RestartIcon", "SyncIcon"}), 3.5f);
         BSML::Lite::CreateUIButton(topRow->get_transform(), "Refresh", [self]() {
             self->Refresh();
         });
 
-        // Row 2: player filter (dropdown recreated after each refresh).
-        auto filterRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
-        filterRow->set_childControlWidth(true);
-        filterRow->set_childControlHeight(true);
-        filterRow->set_childForceExpandWidth(false);
-        auto filterElement = filterRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        filterElement->set_preferredWidth(90.0f);
-        filterContainer = filterRow->get_transform();
+        // Row 2: heading on the left, player filter dropdown on the right
+        // (the dropdown itself is recreated after each refresh).
+        auto headingRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
+        headingRow->set_childControlWidth(true);
+        headingRow->set_childControlHeight(true);
+        headingRow->set_childForceExpandWidth(false);
+        headingRow->set_childAlignment(UnityEngine::TextAnchor::MiddleLeft);
+        headingRow->set_spacing(1.5f);
+        auto headingElement = headingRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        headingElement->set_preferredWidth(CONTENT_WIDTH);
+        AddIcon(headingRow->get_transform(), FindIcon({"PlayersIcon", "FriendsIcon", "PlayerIcon", "GlobalIcon"}), 4.0f);
+        auto headingText = BSML::Lite::CreateText(headingRow->get_transform(), "<b>TOP PLAYERS</b>");
+        headingText->set_fontSize(3.6f);
+        headingText->set_alignment(TMPro::TextAlignmentOptions::MidlineLeft);
+        auto headingTextElement = headingText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        headingTextElement->set_flexibleWidth(1000.0f);
+        auto filterHolder = BSML::Lite::CreateHorizontalLayoutGroup(headingRow->get_transform());
+        filterHolder->set_childControlWidth(true);
+        filterHolder->set_childControlHeight(true);
+        filterHolder->set_childForceExpandWidth(false);
+        auto filterElement = filterHolder->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+        filterElement->set_preferredWidth(45.0f);
+        filterContainer = filterHolder->get_transform();
 
+        // Secondary info line: small and muted so the score rows below stay
+        // the visual focus.
         statusText = BSML::Lite::CreateText(parent, "");
-        statusText->set_fontSize(3.0f);
+        statusText->set_fontSize(2.6f);
+        statusText->set_color({0.62f, 0.68f, 0.76f, 1.0f});
         statusText->set_alignment(TMPro::TextAlignmentOptions::Center);
         auto statusElement = statusText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-        statusElement->set_preferredWidth(95.0f);
-        statusElement->set_preferredHeight(5.0f);
+        statusElement->set_preferredWidth(CONTENT_WIDTH);
+        statusElement->set_preferredHeight(4.0f);
 
         // The scrollable list carries its own LayoutElement sized from the
         // sizeDelta we pass, so it slots into the stack as a normal child.
@@ -389,10 +448,20 @@ void FeedViewController::DidActivate(bool firstActivation, bool addedToHierarchy
         // whenever a cell reports selection regardless of which IDataSource
         // is installed, so swapping SetDataSource below does not disturb it
         // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
-        listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {95.0f, 50.0f}, [self](int idx) {
+        listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, 52.0f}, [self](int idx) {
             self->OnCellClicked(idx);
         });
         listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
+
+        // Center the page up/down arrows over the rows; stock placement
+        // leaves them offset to one side of the viewport.
+        if (auto scrollView = listData->tableView->_scrollView) {
+            for (auto button : {scrollView->_pageUpButton, scrollView->_pageDownButton}) {
+                if (!button) continue;
+                auto rect = button->GetComponent<UnityEngine::RectTransform*>();
+                rect->set_anchoredPosition({0.0f, rect->get_anchoredPosition().y});
+            }
+        }
 
         // Detail modal: cover art + song text on top, avatar + player row,
         // stats, then the play button. Same data as before, card look.

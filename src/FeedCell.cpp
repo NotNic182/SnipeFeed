@@ -23,7 +23,7 @@ namespace {
 <horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' child-align='MiddleLeft' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
     <text id='rankText' font-size='3.2' align='Center' word-wrapping='false' pref-width='4'/>
     <image id='coverImage' pref-width='10.5' pref-height='10.5' preserve-aspect='true'/>
-    <vertical spacing='0' pref-width='77' flexible-width='1000' child-expand-height='false' child-control-height='true'>
+    <vertical spacing='0' pref-width='60' flexible-width='1000' child-expand-height='false' child-control-height='true'>
         <text id='songText' font-size='3.8' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
         <horizontal spacing='1.5' pref-height='4.8' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
             <image id='avatarImage' pref-width='4' pref-height='4' preserve-aspect='true'/>

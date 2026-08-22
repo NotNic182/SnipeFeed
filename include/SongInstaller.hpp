@@ -15,7 +15,14 @@ namespace SnipeFeed::Installer {
     // on the main thread.
     void DownloadAndInstallAsync(std::string hash, std::function<void(bool, std::string)> onDone);
 
-    // Opens the solo level selection with the given level selected.
-    // Must be called on the main thread with the main menu visible.
-    void OpenLevel(GlobalNamespace::BeatmapLevel* level);
+    // Primes the solo flow coordinator so its next activation opens with
+    // the given level selected. Must be called on the main thread while the
+    // coordinator is still active (i.e. before dismissing back to the main
+    // menu). Returns false if the coordinator could not be found.
+    bool PrimeSoloFlow(GlobalNamespace::BeatmapLevel* level);
+
+    // Presses the main menu's Solo button, activating the (primed) solo
+    // flow. Must be called on the main thread with the main menu visible.
+    // Returns false if the button could not be found.
+    bool PressSoloButton();
 }

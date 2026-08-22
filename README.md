@@ -1,6 +1,6 @@
 # SnipeFeed
 
-Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed** button to the main menu (Mods section) that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
+Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of Solo song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
 
 - Target: **Beat Saber 1.40.8 (build 7379), Quest standalone (aarch64), Scotland2**
 - Dependencies (auto-installed from `mod.json`): beatsaber-hook, custom-types, paper2, BSML
@@ -9,7 +9,7 @@ Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed**
 ## Setup (one time)
 
 1. Install `SnipeFeed.qmod` (see Install below).
-2. In the main menu, open **Snipe Feed**.
+2. Enter **Solo**, then on the left panel open the **Mods** tab and select **Snipe Feed**.
 3. If you are logged in inside the official BeatLeader mod, the feed loads automatically — nothing to enter. Then press **Refresh**.
 
 The value is saved to the mod config; after that the feed loads whenever you open the view.
@@ -40,6 +40,10 @@ qpm s qmod       # packages SnipeFeed.qmod
 2.  Entries merged and sorted newest-first: player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, time ago.
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
+
+## v1.1.0 features
+
+- **Moved into the gameplay setup panel**: the feed no longer lives behind a main-menu Mods button. It is now a **Snipe Feed** tab in the left panel's **Mods** section during Solo song selection, alongside tabs like ReeSabers and Qounters++ — check the feed right where you pick your next song. The layout was compacted to fit the panel (same control row, status line, score rows, and detail modal). **Play / Download & Play** still works from there: the game hops back to the main menu for a moment and re-enters Solo with the chosen song selected.
 
 ## v1.0.0 features
 

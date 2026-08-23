@@ -8,6 +8,7 @@ using System.Net.Http;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using UnityEngine.Networking;
 
 namespace SnipeFeed.PC.Services
 {
@@ -135,15 +136,36 @@ namespace SnipeFeed.PC.Services
             var beatLeader = FindBeatLeaderAssembly();
             if (beatLeader == null) return null;
 
-            var session = TryGetBeatLeaderSession(beatLeader);
-            if (session == null)
+            if (!IsBeatLeaderSignedIn(beatLeader) && TryGetBeatLeaderSession(beatLeader) == null)
             {
                 progress?.Invoke("Waiting for the BeatLeader mod to sign in...");
                 await WaitForBeatLeaderLogin(beatLeader);
-                session = TryGetBeatLeaderSession(beatLeader);
-                if (session == null) return null;
             }
 
+            // Newer BeatLeader versions keep the login in a managed cookie
+            // container we can copy read-only into our own client.
+            var session = TryGetBeatLeaderSession(beatLeader);
+            if (session != null)
+            {
+                var viaCookies = await FetchFriendScoresWithCookies(session, count);
+                if (viaCookies != null) return viaCookies;
+            }
+
+            // Older versions (0.9.x) sign in through UnityWebRequest, whose
+            // engine-level cookie cache is shared process-wide — a
+            // UnityWebRequest from us to the same server carries the login
+            // automatically. Without a login the request just returns 401.
+            foreach (var apiBase in CandidateApiBases(beatLeader))
+            {
+                var viaUnity = await FetchFriendScoresViaUnity(apiBase, count);
+                if (viaUnity != null) return viaUnity;
+            }
+
+            return null;
+        }
+
+        private static async Task<List<FeedEntry>> FetchFriendScoresWithCookies(BeatLeaderSession session, int count)
+        {
             // Copy the cookies read-only so we never mutate the BeatLeader
             // mod's own session state.
             var apiUri = new Uri(session.ApiBase);
@@ -159,19 +181,69 @@ namespace SnipeFeed.PC.Services
             {
                 client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
 
-                var response = await client.GetAsync(session.ApiBase + "/user/friendScores?sortBy=date&order=desc&page=1&count=" + count);
+                var response = await client.GetAsync(FriendScoresUrl(session.ApiBase, count));
                 if (!response.IsSuccessStatusCode)
                 {
-                    Plugin.Log?.Info("friendScores via the BeatLeader session returned HTTP " + (int)response.StatusCode + "; falling back to the public API.");
+                    Plugin.Log?.Info("friendScores via the BeatLeader session cookies returned HTTP " + (int)response.StatusCode + ".");
                     return null;
                 }
 
-                var body = await response.Content.ReadAsStringAsync();
-                var page = JsonConvert.DeserializeObject<ScorePageDto>(body);
-                if (page?.data == null) return null;
+                return ParseFriendScores(await response.Content.ReadAsStringAsync());
+            }
+        }
 
-                var unknown = new PlayerDto { name = "?" };
-                return page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
+        private static async Task<List<FeedEntry>> FetchFriendScoresViaUnity(string apiBase, int count)
+        {
+            try
+            {
+                using (var request = UnityWebRequest.Get(FriendScoresUrl(apiBase, count)))
+                {
+                    request.timeout = 15;
+                    request.SetRequestHeader("User-Agent", "SnipeFeed-PC/2.0.0");
+                    var operation = request.SendWebRequest();
+                    while (!operation.isDone) await Task.Yield();
+
+                    if (request.responseCode != 200)
+                    {
+                        Plugin.Log?.Info("friendScores via the Unity cookie cache returned HTTP " + request.responseCode + " on " + apiBase + ".");
+                        return null;
+                    }
+
+                    return ParseFriendScores(request.downloadHandler.text);
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log?.Debug("Unity web request for friendScores failed: " + ex.Message);
+                return null;
+            }
+        }
+
+        private static string FriendScoresUrl(string apiBase, int count) =>
+            apiBase + "/user/friendScores?sortBy=date&order=desc&page=1&count=" + count;
+
+        private static List<FeedEntry> ParseFriendScores(string body)
+        {
+            var page = JsonConvert.DeserializeObject<ScorePageDto>(body);
+            if (page?.data == null) return null;
+
+            var unknown = new PlayerDto { name = "?" };
+            var entries = page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
+            return entries.Count > 0 ? entries : null;
+        }
+
+        // Old BeatLeader versions have no WaitLogin task, only this flag.
+        private static bool IsBeatLeaderSignedIn(Assembly beatLeader)
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            try
+            {
+                var authType = beatLeader.GetType("BeatLeader.API.Authentication", false);
+                return authType?.GetField("_signedIn", flags)?.GetValue(null) as bool? ?? false;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -215,7 +287,7 @@ namespace SnipeFeed.PC.Services
 
             for (var waited = 0; waited < LoginWaitMilliseconds; waited += 500)
             {
-                if (TryGetBeatLeaderSession(beatLeader) != null) return;
+                if (IsBeatLeaderSignedIn(beatLeader) || TryGetBeatLeaderSession(beatLeader) != null) return;
                 await Task.Delay(500);
             }
         }

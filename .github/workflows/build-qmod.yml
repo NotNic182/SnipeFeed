@@ -29,32 +29,12 @@ jobs:
           chmod +x /tmp/qpm/qpm
           echo "/tmp/qpm" >> "$GITHUB_PATH"
 
-      - name: QPM info
-        run: qpm --help | head -40
+      - name: Install zip
+        run: sudo apt-get update && sudo apt-get install -y zip
 
-      - name: Restore dependencies
+      - name: Build without qpackages
         shell: bash
-        run: |
-          for attempt in 1 2 3 4 5 6; do
-            echo "QPM restore attempt $attempt/6"
-            if qpm restore; then
-              exit 0
-            fi
-            sleep 12
-          done
-          exit 1
-
-      - name: Resolve Android NDK
-        run: qpm ndk resolve -d
-
-      - name: Build native library
-        run: qpm s build
-
-      - name: Regenerate qmod manifest
-        run: qpm qmod manifest
-
-      - name: Package qmod
-        run: qpm s qmod
+        run: bash scripts/build-without-qpackages.sh
 
       - name: Verify output
         shell: bash

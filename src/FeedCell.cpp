@@ -36,9 +36,10 @@ namespace {
 </horizontal>)";
 
     // While an image is loading (or failed) the ImageView shows as a dim
-    // tile instead of a stark white square.
-    constexpr UnityEngine::Color PLACEHOLDER_TINT = {1.0f, 1.0f, 1.0f, 0.15f};
-    constexpr UnityEngine::Color LOADED_TINT = {1.0f, 1.0f, 1.0f, 1.0f};
+    // tile instead of a stark white square. Tints live on FeedCell so the
+    // detail modal uses the exact same values.
+    const UnityEngine::Color PLACEHOLDER_TINT = SnipeFeed::FeedCell::PlaceholderTint();
+    const UnityEngine::Color LOADED_TINT = SnipeFeed::FeedCell::LoadedTint();
 
     constexpr float BG_ALPHA_IDLE = 0.55f;
     constexpr float BG_ALPHA_ACTIVE = 0.8f;

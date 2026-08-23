@@ -4,6 +4,7 @@
 
 #include "custom-types/shared/macros.hpp"
 #include "HMUI/ImageView.hpp"
+#include "UnityEngine/Color.hpp"
 #include "HMUI/SelectableCell.hpp"
 #include "HMUI/TableCell.hpp"
 #include "HMUI/TableView.hpp"
@@ -37,6 +38,11 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
 
    public:
     static constexpr float CELL_HEIGHT = 10.5f;
+
+    // Image tints shared by the feed rows and the detail modal so their
+    // loading/loaded states always match.
+    static UnityEngine::Color PlaceholderTint() { return {1.0f, 1.0f, 1.0f, 0.15f}; }
+    static UnityEngine::Color LoadedTint() { return {1.0f, 1.0f, 1.0f, 1.0f}; }
 
     static FeedCell* GetCell(HMUI::TableView* tableView);
     void SetData(SnipeFeed::FeedEntry const& entry, int rank);

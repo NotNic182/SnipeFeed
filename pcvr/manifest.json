@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/bsmg/BSIPA-MetadataFileSchema/master/Schema.json",
+  "id": "SnipeFeedPC",
+  "name": "SnipeFeed PCVR",
+  "author": "NotNic",
+  "version": "2.0.0-pc.1",
+  "description": "Your BeatLeader following feed inside Beat Saber on PCVR, with BeatSaver download support.",
+  "gameVersion": "1.40.8",
+  "dependsOn": {
+    "BSIPA": "^4.3.5",
+    "BeatSaberMarkupLanguage": "^1.12.3",
+    "SongCore": "^3.0.0"
+  }
+}

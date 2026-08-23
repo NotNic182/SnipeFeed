@@ -19,6 +19,7 @@
 #include "GlobalNamespace/LevelCollectionNavigationController.hpp"
 #include "GlobalNamespace/LevelFilteringNavigationController.hpp"
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
+#include "GlobalNamespace/SoloFreePlayFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
 #include "HMUI/ScrollView.hpp"
 #include "HMUI/ViewController.hpp"
@@ -195,10 +196,14 @@ void FeedView::OnCellClicked(int listIdx) {
         });
     }
 
-    // In a lobby (no song-select screen open) we can download maps but not
-    // launch them — launching would require hijacking the lobby's flow.
+    // Launching works when the solo flow is on top (re-entry) or a song
+    // picker is showing (direct select). In a lobby neither holds: we can
+    // download maps but not launch them.
+    auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
+    HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
+    bool soloOnTop = youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
     auto nav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
-    bool canLaunchHere = nav && nav->get_isActiveAndEnabled();
+    bool canLaunchHere = soloOnTop || (nav && nav->get_isActiveAndEnabled());
     bool installed = !e.songHash.empty() && Installer::GetInstalledLevel(e.songHash);
 
     if (playButtonText) {
@@ -223,38 +228,41 @@ void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     // screen when the gameplay setup panel comes back.
     if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
-    // This tab only exists inside a song-selection screen, so the level
-    // pickers are alive RIGHT NOW — select the song in place instead of
-    // backing out to the main menu and re-entering Solo. Works in solo,
-    // party, and multiplayer song select alike (same controllers).
-    auto collectionNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
-    if (collectionNav && collectionNav->get_isActiveAndEnabled()) {
-        auto filterNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelFilteringNavigationController*>();
-
-        // The pack switch below is ASYNC: the new list content arrives a
-        // few frames later, so an immediate SelectLevel can miss. This is
-        // the game's own answer to that: the controller consumes
-        // _beatmapLevelToBeSelectedAfterPresent when the pack's list gets
-        // presented. The direct SelectLevel afterwards covers the case
-        // where Custom Levels is already the shown pack (no re-present).
-        collectionNav->_beatmapLevelToBeSelectedAfterPresent = level;
-        bool switchedPack = false;
-        if (filterNav && filterNav->get_isActiveAndEnabled()) {
-            if (auto pack = SongCore::API::Loading::GetCustomLevelPack()) {
-                filterNav->SelectAnnotatedBeatmapLevelCollection(static_cast<GlobalNamespace::BeatmapLevelPack*>(pack));
-                switchedPack = true;
-            }
-        }
-        collectionNav->SelectLevel(level);
-        SnipeFeedLogger.info("LaunchLevel in place: switchedPack={} level={}", switchedPack, static_cast<std::string>(level->songName));
+    // In-place selection into the solo picker is NOT a supported game
+    // operation: LevelSelectionNavigationController::Setup only stores its
+    // "select after present" state and applies it on the next activation,
+    // so every in-place attempt either no-ops or resets the picker to
+    // defaults. The game's own mechanism is re-entry — and that is only
+    // safe when the SOLO flow is what's on top (never from a lobby, where
+    // dismissing flows corrupts the menu state).
+    auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
+    HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
+    bool soloOnTop = youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
+    if (soloOnTop && youngest->_parentFlowCoordinator) {
+        if (!Installer::PrimeSoloFlow(level)) return;
+        SnipeFeedLogger.info("LaunchLevel: re-entering solo with {}", static_cast<std::string>(level->songName));
+        youngest->_parentFlowCoordinator->DismissFlowCoordinator(
+            youngest, HMUI::ViewController::AnimationDirection::Horizontal,
+            BSML::MakeSystemAction([]() {
+                Installer::PressSoloButton();
+            }),
+            false);
         return;
     }
 
-    // No song-select screen is open (e.g. a multiplayer / Multiplayer+
-    // lobby). NEVER hijack the solo flow from here — dismissing flow
-    // coordinators under an active lobby corrupts the menu state (main
-    // menu while still "in" the room, solo playback inside the lobby).
-    // The map is installed; just point the player at it.
+    // Multiplayer's own song-select screen: its Custom Levels list is the
+    // one showing, so a plain SelectLevel works there (BetterSongSearch
+    // uses the same call). Harmless no-op if the level isn't in the shown
+    // list.
+    auto collectionNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
+    if (collectionNav && collectionNav->get_isActiveAndEnabled()) {
+        SnipeFeedLogger.info("LaunchLevel: selecting in active picker: {}", static_cast<std::string>(level->songName));
+        collectionNav->SelectLevel(level);
+        return;
+    }
+
+    // A lobby (vanilla or Multiplayer+) with no picker open. NEVER hijack
+    // flows from here — the map is installed; point the player at it.
     if (statusText)
         statusText->set_text("Map installed — pick it in the song picker (Custom Levels).");
 }

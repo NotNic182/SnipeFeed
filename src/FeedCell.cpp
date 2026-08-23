@@ -21,18 +21,18 @@ namespace {
     // chevron last. ids bind to the DECLARE_INSTANCE_FIELDs.
     constexpr auto CELL_BSML = R"(
 <horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' child-align='MiddleLeft' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
-    <text id='rankText' font-size='3.2' align='Center' word-wrapping='false' pref-width='4'/>
-    <image id='coverImage' pref-width='10.5' pref-height='10.5' preserve-aspect='true'/>
+    <text id='rankText' font-size='3' align='Center' word-wrapping='false' pref-width='3.5'/>
+    <image id='coverImage' pref-width='8.5' pref-height='8.5' preserve-aspect='true'/>
     <vertical spacing='0' pref-width='60' flexible-width='1000' child-expand-height='false' child-control-height='true'>
-        <text id='songText' font-size='3.8' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
-        <horizontal spacing='1.5' pref-height='4.8' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
-            <image id='avatarImage' pref-width='4' pref-height='4' preserve-aspect='true'/>
-            <text id='playerText' font-size='3' align='MidlineLeft' word-wrapping='false'/>
-            <text id='statsText' font-size='2.8' align='MidlineLeft' word-wrapping='false'/>
-            <text id='timeText' font-size='2.6' color='#8899AA' align='MidlineLeft' word-wrapping='false' flexible-width='1000'/>
+        <text id='songText' font-size='3.4' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
+        <horizontal spacing='1.5' pref-height='4.2' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
+            <image id='avatarImage' pref-width='3.5' pref-height='3.5' preserve-aspect='true'/>
+            <text id='playerText' font-size='2.8' align='MidlineLeft' word-wrapping='false'/>
+            <text id='statsText' font-size='2.6' align='MidlineLeft' word-wrapping='false'/>
+            <text id='timeText' font-size='2.4' color='#8899AA' align='MidlineLeft' word-wrapping='false' flexible-width='1000'/>
         </horizontal>
     </vertical>
-    <text id='chevronText' font-size='4.5' color='#5A6B7A' align='Center' word-wrapping='false' pref-width='3'/>
+    <text id='chevronText' font-size='4' color='#5A6B7A' align='Center' word-wrapping='false' pref-width='3'/>
 </horizontal>)";
 
     // While an image is loading (or failed) the ImageView shows as a dim

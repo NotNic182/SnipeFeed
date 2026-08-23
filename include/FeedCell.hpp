@@ -36,7 +36,7 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     DECLARE_INSTANCE_FIELD(StringW, pendingAvatarUrl);
 
    public:
-    static constexpr float CELL_HEIGHT = 13.0f;
+    static constexpr float CELL_HEIGHT = 10.5f;
 
     static FeedCell* GetCell(HMUI::TableView* tableView);
     void SetData(SnipeFeed::FeedEntry const& entry, int rank);

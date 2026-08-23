@@ -10,10 +10,8 @@ using SongCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading.Tasks;
 using TMPro;
 using UnityEngine;
-using UnityEngine.UI;
 
 namespace SnipeFeed.PC.UI
 {
@@ -42,7 +40,7 @@ namespace SnipeFeed.PC.UI
         private TextMeshProUGUI _detailText;
 
         [UIComponent("play-button")]
-        private Button _playButton;
+        private NoTransitionsButton _playButton;
 
         [UIComponent("player-filter")]
         private DropDownListSetting _playerFilter;

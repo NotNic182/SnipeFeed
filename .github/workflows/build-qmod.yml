@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - chatgpt-qmod-build
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:

@@ -134,7 +134,11 @@ namespace SnipeFeed.PC.Services
         private static async Task<List<FeedEntry>> TryFetchAuthenticatedFriendScores(int count, Action<string> progress)
         {
             var beatLeader = FindBeatLeaderAssembly();
-            if (beatLeader == null) return null;
+            if (beatLeader == null)
+            {
+                Plugin.Log?.Info("BeatLeader mod not found; using the public API fallback.");
+                return null;
+            }
 
             if (!IsBeatLeaderSignedIn(beatLeader) && TryGetBeatLeaderSession(beatLeader) == null)
             {
@@ -148,7 +152,11 @@ namespace SnipeFeed.PC.Services
             if (session != null)
             {
                 var viaCookies = await FetchFriendScoresWithCookies(session, count);
-                if (viaCookies != null) return viaCookies;
+                if (viaCookies != null)
+                {
+                    Plugin.Log?.Info("Loaded the friends feed with the BeatLeader session cookies (" + session.ApiBase + ").");
+                    return viaCookies;
+                }
             }
 
             // Older versions (0.9.x) sign in through UnityWebRequest, whose
@@ -158,9 +166,14 @@ namespace SnipeFeed.PC.Services
             foreach (var apiBase in CandidateApiBases(beatLeader))
             {
                 var viaUnity = await FetchFriendScoresViaUnity(apiBase, count);
-                if (viaUnity != null) return viaUnity;
+                if (viaUnity != null)
+                {
+                    Plugin.Log?.Info("Loaded the friends feed through the Unity cookie cache (" + apiBase + ").");
+                    return viaUnity;
+                }
             }
 
+            Plugin.Log?.Info("BeatLeader is installed but no reusable login was found; using the public API fallback.");
             return null;
         }
 

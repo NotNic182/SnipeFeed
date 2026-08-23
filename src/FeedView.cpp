@@ -15,6 +15,9 @@
 
 #include "songcore/shared/SongCore.hpp"
 
+#include "GlobalNamespace/BeatmapLevelPack.hpp"
+#include "GlobalNamespace/LevelCollectionNavigationController.hpp"
+#include "GlobalNamespace/LevelFilteringNavigationController.hpp"
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
 #include "HMUI/ScrollView.hpp"
@@ -209,13 +212,32 @@ void FeedView::OnCellClicked(int listIdx) {
 
 void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     if (!level) return;
-    // Hide instantly (animated=false): the flow-coordinator dismissal below
-    // would freeze an animated hide mid-flight, leaving the modal stuck on
+    // Hide instantly (animated=false): an animated hide would be frozen
+    // mid-flight by the flow transitions below, leaving the modal stuck on
     // screen when the gameplay setup panel comes back.
     if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
-    // Prime the solo flow coordinator with our level while it is still
-    // active — after the dismissal below it can no longer be found.
+    // This tab only exists inside a song-selection screen, so the level
+    // pickers are alive RIGHT NOW — select the song in place instead of
+    // backing out to the main menu and re-entering Solo. Works in solo,
+    // party, and multiplayer song select alike (same controllers).
+    auto collectionNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
+    if (collectionNav && collectionNav->get_isActiveAndEnabled()) {
+        auto filterNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelFilteringNavigationController*>();
+        if (filterNav && filterNav->get_isActiveAndEnabled()) {
+            // Make sure the Custom Levels pack is the one being shown; the
+            // level select below is deferred by the controller until the
+            // pack finishes presenting (_beatmapLevelToBeSelectedAfterPresent).
+            if (auto pack = SongCore::API::Loading::GetCustomLevelPack())
+                filterNav->SelectAnnotatedBeatmapLevelCollection(static_cast<GlobalNamespace::BeatmapLevelPack*>(pack));
+        }
+        collectionNav->SelectLevel(level);
+        return;
+    }
+
+    // Fallback (e.g. multiplayer lobby where song select is not open yet):
+    // prime the solo flow coordinator while it can still be found, then
+    // back out and re-enter Solo with the level selected.
     if (!Installer::PrimeSoloFlow(level)) return;
 
     // Our tab lives in the gameplay setup panel inside the solo song
@@ -436,27 +458,23 @@ void FeedView::BuildUI() {
     // whenever a cell reports selection regardless of which IDataSource
     // is installed, so swapping SetDataSource below does not disturb it
     // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
-    // Parent the list to the tab itself (NOT the top-pinned layout stack)
-    // so it can be anchor-stretched below: top edge fixed under the header,
-    // bottom edge glued to the tab's actual bottom, whatever the panel's
-    // real height is.
-    listData = BSML::Lite::CreateScrollableList(get_transform(), {0.0f, 0.0f}, {CONTENT_WIDTH, 34.0f}, [self](int idx) {
+    // Size the list to the tab's MEASURED height: the scroll viewport
+    // inside CreateScrollableList is sized once at creation and does not
+    // follow later RectTransform changes, so the height must be right up
+    // front. DidActivate defers BuildUI until the rect reports a real
+    // height; 34 is only the last-resort fallback.
+    float tabHeight = 0.0f;
+    if (auto tabRect = GetComponent<UnityEngine::RectTransform*>())
+        tabHeight = tabRect->get_rect().get_height();
+    float listHeight = tabHeight > 30.0f
+        ? std::clamp(tabHeight - HEADER_HEIGHT - 1.0f, 20.0f, 200.0f)
+        : 34.0f;
+    SnipeFeedLogger.info("Gameplay setup tab height {:.1f}, list height {:.1f}", tabHeight, listHeight);
+
+    listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, listHeight}, [self](int idx) {
         self->OnCellClicked(idx);
     });
     listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
-
-    // Find the created hierarchy's root (direct child of the tab) and
-    // stretch it: full remaining height under the header, CONTENT_WIDTH wide.
-    auto listRoot = listData->get_transform();
-    while (listRoot->get_parent() && listRoot->get_parent() != get_transform())
-        listRoot = listRoot->get_parent();
-    if (auto listRect = listRoot->GetComponent<UnityEngine::RectTransform*>()) {
-        listRect->set_anchorMin({0.5f, 0.0f});
-        listRect->set_anchorMax({0.5f, 1.0f});
-        listRect->set_pivot({0.5f, 1.0f});
-        listRect->set_offsetMax({CONTENT_WIDTH / 2.0f, -HEADER_HEIGHT});
-        listRect->set_offsetMin({-CONTENT_WIDTH / 2.0f, 0.5f});
-    }
 
     // Center the page up/down arrows over the rows; stock placement
     // leaves them offset to one side of the viewport. SetAsLastSibling
@@ -518,7 +536,23 @@ void FeedView::BuildUI() {
 }
 
 void FeedView::DidActivate(bool firstActivation) {
-    if (!listData) BuildUI();
+    if (!listData) {
+        // The tab's RectTransform may not have its final height on the very
+        // first activation frame; the list viewport must be created at the
+        // right size (see BuildUI), so wait a frame until layout settles.
+        float height = 0.0f;
+        if (auto rect = GetComponent<UnityEngine::RectTransform*>())
+            height = rect->get_rect().get_height();
+        if (height <= 30.0f && buildAttempts < 5) {
+            buildAttempts++;
+            auto weakSelf = UnityW<FeedView>(this);
+            BSML::MainThreadScheduler::Schedule([weakSelf]() mutable {
+                if (weakSelf) weakSelf->DidActivate(false);
+            });
+            return;
+        }
+        BuildUI();
+    }
 
     // Defensive: if a hide was ever interrupted (menu hop, tab switch),
     // clear the modal the moment the tab shows again.

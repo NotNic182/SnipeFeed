@@ -6,23 +6,40 @@ using SnipeFeed.PC.Configuration;
 using SnipeFeed.PC.Models;
 using SnipeFeed.PC.Services;
 using SnipeFeed.PC.Utils;
-using SongCore;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 namespace SnipeFeed.PC.UI
 {
+    // The Snipe Feed gameplay setup tab, mirroring the Quest mod's
+    // FeedView: a filter/count/refresh control row, a muted status line, a
+    // BeatLeader-style score list, and a detail modal with cover art,
+    // avatar and the play/download button. This object outlives the tab's
+    // GameObjects (BSML re-parses the same host on every menu rebuild), so
+    // the feed survives menu visits just like the Quest mod's static state.
     internal sealed class SnipeFeedView
     {
         private const string AllPlayers = "All players";
         private static readonly TimeSpan CacheLifetime = TimeSpan.FromMinutes(2);
+
+        // Vertical space the control row + status line take above the list;
+        // the list is sized to (measured tab height - HeaderHeight). Keep in
+        // tune with the header in SnipeFeedView.bsml.
+        private const float HeaderHeight = 13.5f;
+
+        // While an image is loading (or failed) it shows as a dim tile
+        // instead of a stark white square. Shared by rows and the modal.
+        internal static readonly Color PlaceholderTint = new Color(1f, 1f, 1f, 0.15f);
+        internal static readonly Color LoadedTint = Color.white;
+
         private readonly BeatLeaderService _service = new BeatLeaderService();
         private readonly List<FeedEntry> _entries = new List<FeedEntry>();
         private readonly List<FeedEntry> _visibleEntries = new List<FeedEntry>();
-        private List<CustomListTableData.CustomCellInfo> _feedCells = new List<CustomListTableData.CustomCellInfo>();
+        private List<object> _feedRows = new List<object>();
         private List<object> _filterOptions = new List<object> { AllPlayers };
         private string _selectedFilter = AllPlayers;
         private FeedEntry _selected;
@@ -30,23 +47,48 @@ namespace SnipeFeed.PC.UI
         private bool _refreshing;
         private bool _installing;
 
+        // Stale-guards for the modal images: a second selection before a
+        // download lands must not let the first score's art pop in.
+        private string _pendingCoverUrl;
+        private string _pendingAvatarUrl;
+
+        private Transform _modalOriginalParent;
+
+        [UIObject("root")]
+        private GameObject _rootObject;
+
         [UIComponent("feed-list")]
-        private CustomListTableData _feedList;
+        private CustomCellListTableData _feedList;
 
         [UIComponent("status")]
         private TextMeshProUGUI _status;
 
-        [UIComponent("detail-text")]
-        private TextMeshProUGUI _detailText;
+        [UIComponent("player-filter")]
+        private DropDownListSetting _playerFilter;
+
+        [UIComponent("feed-count-setting")]
+        private IncrementSetting _feedCountSetting;
+
+        [UIComponent("detail-modal")]
+        private ModalView _detailModal;
+
+        [UIComponent("modal-cover")]
+        private ImageView _modalCover;
+
+        [UIComponent("modal-avatar")]
+        private ImageView _modalAvatar;
+
+        [UIComponent("modal-detail")]
+        private TextMeshProUGUI _modalDetail;
+
+        [UIComponent("modal-player")]
+        private TextMeshProUGUI _modalPlayer;
 
         [UIComponent("play-button")]
         private NoTransitionsButton _playButton;
 
-        [UIComponent("player-filter")]
-        private DropDownListSetting _playerFilter;
-
         [UIValue("feed-cells")]
-        public List<CustomListTableData.CustomCellInfo> FeedCells => _feedCells;
+        public List<object> FeedRows => _feedRows;
 
         [UIValue("filter-options")]
         public List<object> FilterOptions => _filterOptions;
@@ -63,40 +105,125 @@ namespace SnipeFeed.PC.UI
         }
 
         [UIValue("feed-count")]
-        public float FeedCount
+        public int FeedCount
         {
-            get => PluginConfig.Instance?.FeedCount ?? 50;
+            get => Math.Max(10, Math.Min(100, PluginConfig.Instance?.FeedCount ?? 50));
             set
             {
                 if (PluginConfig.Instance != null)
-                    PluginConfig.Instance.FeedCount = Math.Max(10, Math.Min(100, (int)Math.Round(value)));
-            }
-        }
-
-        [UIValue("player-id")]
-        public string PlayerId
-        {
-            get => PluginConfig.Instance?.PlayerId ?? "";
-            set
-            {
-                if (PluginConfig.Instance != null)
-                    PluginConfig.Instance.PlayerId = (value ?? "").Trim();
+                    PluginConfig.Instance.FeedCount = Math.Max(10, Math.Min(100, value));
             }
         }
 
         [UIAction("#post-parse")]
         private void PostParse()
         {
-            if (_entries.Count == 0 || DateTimeOffset.UtcNow - _lastFetch > CacheLifetime)
+            if (_detailModal != null)
+                _modalOriginalParent = _detailModal.transform.parent;
+
+            CompactHeaderRow();
+
+            // Re-run the refresh/rebuild logic whenever the tab becomes
+            // visible again (BSML only parses once per menu build, but the
+            // tab GameObject is toggled on every tab switch and menu visit).
+            if (_rootObject != null)
+            {
+                var watcher = _rootObject.AddComponent<TabVisibility>();
+                watcher.Shown = OnTabShown;
+                watcher.Hidden = OnTabHidden;
+                if (_rootObject.activeInHierarchy)
+                    OnTabShown();
+            }
+        }
+
+        // The stock dropdown/increment prefabs assume a full 90-unit
+        // settings row (label left, control pinned right). In our compact
+        // header row the labels are empty, so stretch the controls over
+        // their whole slot instead of leaving them hanging off the edge.
+        private void CompactHeaderRow()
+        {
+            if (_playerFilter != null)
+            {
+                var rect = _playerFilter.transform as RectTransform;
+                if (rect != null)
+                {
+                    rect.anchorMin = Vector2.zero;
+                    rect.anchorMax = Vector2.one;
+                    rect.sizeDelta = Vector2.zero;
+                    rect.anchoredPosition = Vector2.zero;
+                }
+                if (_playerFilter.Dropdown != null && _playerFilter.Dropdown._text != null)
+                    _playerFilter.Dropdown._text.overflowMode = TextOverflowModes.Ellipsis;
+            }
+
+            if (_feedCountSetting != null && _feedCountSetting.transform.childCount > 1)
+            {
+                var controls = _feedCountSetting.transform.GetChild(1) as RectTransform;
+                if (controls != null)
+                {
+                    controls.anchorMin = Vector2.zero;
+                    controls.anchorMax = Vector2.one;
+                    controls.sizeDelta = Vector2.zero;
+                    controls.anchoredPosition = Vector2.zero;
+                }
+            }
+        }
+
+        private void OnTabShown()
+        {
+            ResizeListToTab();
+
+            // Defensive: if a hide was ever interrupted (menu hop, tab
+            // switch), clear the modal the moment the tab shows again.
+            HideModal(false);
+
+            var stale = _entries.Count == 0 || DateTimeOffset.UtcNow - _lastFetch > CacheLifetime;
+            if (stale)
+            {
                 Refresh();
+            }
             else
+            {
+                UpdateFilters();
                 RebuildList();
+            }
+        }
+
+        private void OnTabHidden()
+        {
+            HideModal(false);
+        }
+
+        // The list viewport must match the real tab height, which varies a
+        // little with game version/layout; measure it instead of guessing.
+        private void ResizeListToTab()
+        {
+            if (_rootObject == null || _feedList == null) return;
+            var container = _rootObject.transform.parent as RectTransform;
+            if (container == null) return;
+
+            var tabHeight = container.rect.height;
+            if (tabHeight < 30f) return;
+
+            var layout = _feedList.GetComponent<LayoutElement>();
+            if (layout == null) return;
+
+            var target = Mathf.Clamp(tabHeight - HeaderHeight - 1f, 20f, 200f);
+            if (Mathf.Abs(layout.preferredHeight - target) < 1f) return;
+
+            layout.preferredHeight = target;
+            LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)_rootObject.transform);
+            _feedList.TableView.ReloadData();
         }
 
         [UIAction("refresh")]
         public async void Refresh()
         {
-            if (_refreshing) return;
+            if (_refreshing)
+            {
+                SetStatus("Loading...");
+                return;
+            }
             _refreshing = true;
             SetStatus("Loading...");
 
@@ -111,24 +238,26 @@ namespace SnipeFeed.PC.UI
                     SetStatus);
 
                 _entries.Clear();
+                _selected = null;
+
                 if (!result.Success)
                 {
-                    _selected = null;
                     UpdateFilters();
                     RebuildList();
                     SetStatus(result.Error);
-                    SetDetail("Select a score to see details.");
-                    UpdatePlayButton();
                     return;
                 }
 
                 _entries.AddRange(result.Entries);
                 _lastFetch = DateTimeOffset.UtcNow;
-                _selected = null;
+
+                // A successful refresh means the feed (and its images) are
+                // current again — let previously-failed images retry.
+                SpriteCache.ClearFailures();
+
                 UpdateFilters();
                 RebuildList();
-                SetDetail("Select a score to see details.");
-                UpdatePlayButton();
+                HideModal(false);
             }
             catch (Exception ex)
             {
@@ -141,82 +270,13 @@ namespace SnipeFeed.PC.UI
             }
         }
 
-        [UIAction("select-score")]
-        private void SelectScore(TableView table, int index)
-        {
-            if (index < 0 || index >= _visibleEntries.Count) return;
-            table?.ClearSelection();
-            _selected = _visibleEntries[index];
-            SetDetail(Formatting.Detail(_selected));
-            UpdatePlayButton();
-        }
-
-        [UIAction("play-selected")]
-        private async void PlaySelected()
-        {
-            if (_selected == null || _installing || string.IsNullOrWhiteSpace(_selected.SongHash)) return;
-
-            var level = SongInstaller.GetInstalledLevel(_selected.SongHash);
-            if (level == null)
-            {
-                _installing = true;
-                UpdatePlayButton("Downloading...", false);
-                SetStatus("Downloading " + _selected.SongName + " from BeatSaver...");
-
-                try
-                {
-                    var install = await SongInstaller.DownloadAndInstallAsync(_selected.SongHash);
-                    if (!install.Success)
-                    {
-                        SetStatus(install.Error);
-                        return;
-                    }
-
-                    level = install.Level ?? SongInstaller.GetInstalledLevel(_selected.SongHash);
-                    if (level == null)
-                    {
-                        SetStatus("Downloaded. SongCore is still loading it; it should appear in Custom Levels shortly.");
-                        return;
-                    }
-                }
-                finally
-                {
-                    _installing = false;
-                }
-            }
-
-            if (TrySelectInActivePicker(level))
-                SetStatus("Selected " + _selected.SongName + ". Ready to snipe.");
-            else
-                SetStatus("Map installed. Open the song picker and select it from Custom Levels.");
-
-            UpdatePlayButton();
-        }
-
-        private bool TrySelectInActivePicker(BeatmapLevel level)
-        {
-            if (level == null) return false;
-            try
-            {
-                var picker = Resources.FindObjectsOfTypeAll<LevelCollectionNavigationController>()
-                    .FirstOrDefault(x => x != null && x.isActiveAndEnabled);
-                if (picker == null) return false;
-                picker.SelectLevel(level);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log?.Warn("Could not select level in active picker: " + ex.Message);
-                return false;
-            }
-        }
-
         private void UpdateFilters()
         {
             _filterOptions = new List<object> { AllPlayers };
             foreach (var name in _entries.Select(x => x.PlayerName).Where(x => !string.IsNullOrEmpty(x)).Distinct())
                 _filterOptions.Add(name);
 
+            // Drop a stale filter if that player vanished from the feed.
             if (_selectedFilter != AllPlayers && !_filterOptions.Cast<string>().Contains(_selectedFilter))
                 _selectedFilter = AllPlayers;
 
@@ -224,6 +284,7 @@ namespace SnipeFeed.PC.UI
             {
                 _playerFilter.Values = _filterOptions;
                 _playerFilter.UpdateChoices();
+                _playerFilter.Value = _selectedFilter;
             }
         }
 
@@ -234,15 +295,13 @@ namespace SnipeFeed.PC.UI
                 ? _entries
                 : _entries.Where(x => x.PlayerName == _selectedFilter));
 
-            _feedCells = _visibleEntries.Select((entry, index) =>
-                new CustomListTableData.CustomCellInfo(
-                    (index + 1) + ".  " + Formatting.TitleLine(entry),
-                    Formatting.SubLine(entry)))
+            _feedRows = _visibleEntries
+                .Select((entry, index) => (object)new FeedRow(entry, index + 1))
                 .ToList();
 
             if (_feedList != null)
             {
-                _feedList.Data = _feedCells;
+                _feedList.Data = _feedRows;
                 _feedList.TableView.ReloadData();
                 _feedList.TableView.ClearSelection();
             }
@@ -252,39 +311,234 @@ namespace SnipeFeed.PC.UI
                 if (_selectedFilter == AllPlayers)
                     SetStatus(_entries.Count + " recent scores. Newest first — go snipe!");
                 else
-                    SetStatus(_visibleEntries.Count + " of " + _entries.Count + " scores by " + _selectedFilter + ".");
+                    SetStatus(_visibleEntries.Count + " of " + _entries.Count + " scores by " + _selectedFilter);
             }
+            // With no entries, keep whatever error/progress message is showing.
+        }
+
+        [UIAction("select-score")]
+        private void SelectScore(TableView table, object item)
+        {
+            table?.ClearSelection();
+            var row = item as FeedRow;
+            if (row == null) return;
+            _selected = row.Entry;
+
+            if (_modalDetail != null) _modalDetail.text = Formatting.DetailText(_selected);
+            if (_modalPlayer != null) _modalPlayer.text = _selected.PlayerName;
+
+            // Images, with the same stale-guard the rows use.
+            _pendingCoverUrl = _selected.CoverUrl;
+            _pendingAvatarUrl = _selected.AvatarUrl;
+            ResetImage(_modalCover);
+            ResetImage(_modalAvatar);
+            if (!string.IsNullOrEmpty(_selected.CoverUrl))
+            {
+                var url = _selected.CoverUrl;
+                SpriteCache.GetSprite(url, sprite =>
+                {
+                    if (_modalCover == null || _pendingCoverUrl != url) return;
+                    _modalCover.sprite = sprite;
+                    _modalCover.color = LoadedTint;
+                });
+            }
+            if (!string.IsNullOrEmpty(_selected.AvatarUrl))
+            {
+                var url = _selected.AvatarUrl;
+                SpriteCache.GetSprite(url, sprite =>
+                {
+                    if (_modalAvatar == null || _pendingAvatarUrl != url) return;
+                    _modalAvatar.sprite = sprite;
+                    _modalAvatar.color = LoadedTint;
+                });
+            }
+
+            UpdatePlayButton();
+
+            if (_detailModal != null)
+                _detailModal.Show(true, true);
         }
 
         private void UpdatePlayButton()
         {
             if (_selected == null)
             {
-                UpdatePlayButton("Select a score", false);
+                SetPlayButton("Select a score", false);
                 return;
             }
             if (string.IsNullOrWhiteSpace(_selected.SongHash))
             {
-                UpdatePlayButton("Not a custom song", false);
-                return;
-            }
-            if (_installing)
-            {
-                UpdatePlayButton("Downloading...", false);
+                SetPlayButton("Not a custom song", false);
                 return;
             }
 
+            // Launching works when the solo flow is on top (re-entry) or a
+            // song picker is showing (direct select). In a lobby neither
+            // holds: we can download maps but not launch them.
+            var canLaunchHere = IsSoloFlowOnTop(out _) || ActivePicker() != null;
             var installed = SongInstaller.GetInstalledLevel(_selected.SongHash) != null;
-            var pickerOpen = Resources.FindObjectsOfTypeAll<LevelCollectionNavigationController>()
-                .Any(x => x != null && x.isActiveAndEnabled);
 
+            string text;
             if (installed)
-                UpdatePlayButton(pickerOpen ? "Select" : "In Custom Levels", pickerOpen);
+                text = canLaunchHere ? "Play" : "In Custom Levels";
             else
-                UpdatePlayButton(pickerOpen ? "Download & Select" : "Download", true);
+                text = canLaunchHere ? "Download & Play" : "Download";
+
+            SetPlayButton(text, !_installing && (canLaunchHere || !installed));
         }
 
-        private void UpdatePlayButton(string text, bool interactable)
+        [UIAction("play-selected")]
+        private async void PlaySelected()
+        {
+            if (_installing || _selected == null || string.IsNullOrWhiteSpace(_selected.SongHash)) return;
+            var entry = _selected;
+
+            var level = SongInstaller.GetInstalledLevel(entry.SongHash);
+            if (level != null)
+            {
+                LaunchLevel(level);
+                return;
+            }
+
+            _installing = true;
+            SetPlayButton("Downloading...", false);
+
+            try
+            {
+                var install = await SongInstaller.DownloadAndInstallAsync(entry.SongHash);
+                if (!install.Success)
+                {
+                    SetPlayButton("Download & Play", true);
+                    SetDetail("<color=#ff5555>" + install.Error + "</color>");
+                    return;
+                }
+
+                SetPlayButton("Installing...", false);
+                level = install.Level ?? SongInstaller.GetInstalledLevel(entry.SongHash);
+                if (level == null)
+                {
+                    SetPlayButton("Download & Play", true);
+                    SetDetail("Downloaded! The song is still loading — it will appear in Custom Levels shortly.");
+                    return;
+                }
+
+                SetPlayButton("Play", true);
+
+                // Only auto-launch if the user is still on this tab —
+                // firing the solo re-entry while they browse another tab or
+                // screen would yank them away without warning.
+                if (_rootObject != null && _rootObject.activeInHierarchy)
+                    LaunchLevel(level);
+                else
+                    SetStatus("Downloaded — press Play when you're back.");
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log?.Error("Download & play failed: " + ex);
+                SetPlayButton("Download & Play", true);
+                SetDetail("<color=#ff5555>Map install failed: " + ex.Message + "</color>");
+            }
+            finally
+            {
+                _installing = false;
+            }
+        }
+
+        private void LaunchLevel(BeatmapLevel level)
+        {
+            if (level == null) return;
+
+            // Hide instantly (animated=false): an animated hide would be
+            // frozen mid-flight by the flow transitions below, leaving the
+            // modal stuck on screen when the panel comes back.
+            HideModal(false);
+
+            // In-place selection into the solo picker is NOT a supported
+            // game operation: LevelSelectionNavigationController.Setup only
+            // stores its "select after present" state and applies it on the
+            // next activation. The game's own mechanism is re-entry — and
+            // that is only safe when the SOLO flow is what's on top (never
+            // from a lobby, where dismissing flows corrupts the menu state).
+            if (IsSoloFlowOnTop(out var youngest))
+            {
+                var parent = youngest._parentFlowCoordinator;
+                if (parent != null)
+                {
+                    if (!SongInstaller.PrimeSoloFlow(level))
+                    {
+                        // The modal is already hidden — leave SOME feedback
+                        // instead of silently doing nothing.
+                        SetStatus("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
+                        return;
+                    }
+                    Plugin.Log?.Info("LaunchLevel: re-entering solo with " + level.songName);
+                    parent.DismissFlowCoordinator(
+                        youngest,
+                        ViewController.AnimationDirection.Horizontal,
+                        (Action)(() => SongInstaller.PressSoloButton()),
+                        false);
+                    return;
+                }
+            }
+
+            // Multiplayer's own song-select screen: its Custom Levels list
+            // is the one showing, so a plain SelectLevel works there.
+            // Harmless no-op if the level isn't in the shown list.
+            var picker = ActivePicker();
+            if (picker != null)
+            {
+                Plugin.Log?.Info("LaunchLevel: selecting in active picker: " + level.songName);
+                try
+                {
+                    picker.SelectLevel(level);
+                }
+                catch (Exception ex)
+                {
+                    Plugin.Log?.Warn("Could not select level in active picker: " + ex.Message);
+                }
+                return;
+            }
+
+            // A lobby (vanilla or Multiplayer+) with no picker open. NEVER
+            // hijack flows from here — the map is installed; point the
+            // player at it.
+            SetStatus("Map installed — pick it in the song picker (Custom Levels).");
+        }
+
+        private static bool IsSoloFlowOnTop(out FlowCoordinator youngest)
+        {
+            youngest = null;
+            var main = Resources.FindObjectsOfTypeAll<MainFlowCoordinator>().FirstOrDefault();
+            if (main == null) return false;
+            youngest = main.YoungestChildFlowCoordinatorOrSelf();
+            return youngest is SoloFreePlayFlowCoordinator;
+        }
+
+        private static LevelCollectionNavigationController ActivePicker()
+        {
+            return Resources.FindObjectsOfTypeAll<LevelCollectionNavigationController>()
+                .FirstOrDefault(x => x != null && x.isActiveAndEnabled);
+        }
+
+        private void HideModal(bool animated)
+        {
+            if (_detailModal == null) return;
+            var originalParent = _modalOriginalParent;
+            _detailModal.Hide(animated, () =>
+            {
+                if (_detailModal != null && originalParent != null)
+                    _detailModal.transform.SetParent(originalParent, true);
+            });
+        }
+
+        private static void ResetImage(ImageView image)
+        {
+            if (image == null) return;
+            image.sprite = null;
+            image.color = PlaceholderTint;
+        }
+
+        private void SetPlayButton(string text, bool interactable)
         {
             if (_playButton == null) return;
             _playButton.interactable = interactable;
@@ -299,7 +553,77 @@ namespace SnipeFeed.PC.UI
 
         private void SetDetail(string text)
         {
-            if (_detailText != null) _detailText.text = text ?? "";
+            if (_modalDetail != null) _modalDetail.text = text ?? "";
+        }
+
+        // One feed entry as a BeatLeader-style row. BSML parses the cell
+        // template with this object as host each time the row is shown.
+        private sealed class FeedRow
+        {
+            public readonly FeedEntry Entry;
+            private readonly int _rank;
+
+            [UIComponent("cover-image")]
+            private ImageView _cover;
+
+            [UIComponent("avatar-image")]
+            private ImageView _avatar;
+
+            public FeedRow(FeedEntry entry, int rank)
+            {
+                Entry = entry;
+                _rank = rank;
+            }
+
+            [UIValue("rank-text")]
+            public string RankText => Formatting.RankText(_rank);
+
+            [UIValue("song-text")]
+            public string SongText => Formatting.TitleLine(Entry);
+
+            [UIValue("player-text")]
+            public string PlayerText => Formatting.PlayerLine(Entry);
+
+            [UIValue("stats-text")]
+            public string StatsText => Formatting.StatsLine(Entry);
+
+            [UIValue("time-text")]
+            public string TimeText => Formatting.TimeAgo(Entry.Timepost);
+
+            [UIAction("#post-parse")]
+            private void PostParse()
+            {
+                ResetImage(_cover);
+                ResetImage(_avatar);
+                LoadInto(_cover, Entry.CoverUrl);
+                LoadInto(_avatar, Entry.AvatarUrl);
+            }
+
+            private static void LoadInto(ImageView target, string url)
+            {
+                if (target == null || string.IsNullOrEmpty(url)) return;
+                SpriteCache.GetSprite(url, sprite =>
+                {
+                    // The row may have been re-parsed into a fresh cell by
+                    // the time the download lands; only touch the ImageView
+                    // this call was bound to, and only while it's alive.
+                    if (target == null) return;
+                    target.sprite = sprite;
+                    target.color = LoadedTint;
+                });
+            }
+        }
+
+        // Relays the tab GameObject's visibility to the view; BSML has no
+        // per-activation callback for gameplay setup tabs on PC.
+        private sealed class TabVisibility : MonoBehaviour
+        {
+            public Action Shown;
+            public Action Hidden;
+
+            private void OnEnable() => Shown?.Invoke();
+
+            private void OnDisable() => Hidden?.Invoke();
         }
     }
 }

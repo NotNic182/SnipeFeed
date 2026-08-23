@@ -1,8 +1,13 @@
 using SnipeFeed.PC.Models;
 using System;
+using System.Globalization;
 
 namespace SnipeFeed.PC.Utils
 {
+    // Text formatting shared by the feed rows and the detail modal,
+    // mirroring the Quest mod's Format.hpp. Difficulty colors match the
+    // official BeatLeader mod; stat colors are fixed per stat (stars
+    // yellow, accuracy orange, FC green) so rows scan consistently.
     internal static class Formatting
     {
         public static string TimeAgo(long timepost)
@@ -16,38 +21,82 @@ namespace SnipeFeed.PC.Utils
             return (diff / 86400) + "d ago";
         }
 
+        // Top three ranks get medal-ish colors, the rest stay muted.
+        public static string RankText(int rank)
+        {
+            string color;
+            switch (rank)
+            {
+                case 1: color = "#FFB921"; break;
+                case 2: color = "#C4CEDC"; break;
+                case 3: color = "#D98E4A"; break;
+                default: color = "#5A6B7A"; break;
+            }
+            return rank <= 3
+                ? "<b><color=" + color + ">" + rank + "</color></b>"
+                : "<color=" + color + ">" + rank + "</color>";
+        }
+
+        // The feed row's top line: "Song Name - Artist [mapper]" with small
+        // colored difficulty and stars at the end.
         public static string TitleLine(FeedEntry e)
         {
-            var line = e.SongName ?? "";
+            var line = Escape(e.SongName);
             if (!string.IsNullOrEmpty(e.SongAuthor)) line += " <color=#BBCCDD>- " + Escape(e.SongAuthor) + "</color>";
             if (!string.IsNullOrEmpty(e.Mapper)) line += " <size=80%><color=#8899AA>[" + Escape(e.Mapper) + "]</color></size>";
-            if (!string.IsNullOrEmpty(e.Difficulty)) line += "  <size=70%><color=" + DiffColor(e.Difficulty) + ">" + DiffLabel(e.Difficulty) + "</color></size>";
-            if (e.Stars > 0) line += "  <size=70%><color=#FFB921>" + e.Stars.ToString("0.0") + "★</color></size>";
+            line += DiffAndStars(e, "70%");
             return line;
         }
 
-        public static string SubLine(FeedEntry e)
+        public static string PlayerLine(FeedEntry e) => "<b>" + Escape(e.PlayerName) + "</b>";
+
+        public static string StatsLine(FeedEntry e)
         {
-            var stats = "<b>" + Escape(e.PlayerName) + "</b>   " + FormatAcc(e.Accuracy);
-            if (e.Pp > 0) stats += "  <color=#B856FF>" + e.Pp.ToString("0") + "<size=70%>pp</size></color>";
-            if (e.FullCombo) stats += "  <color=#57FF8A>FC</color>";
-            if (!string.IsNullOrEmpty(e.Modifiers)) stats += "  <color=#999999>+" + Escape(e.Modifiers) + "</color>";
+            var line = FormatAcc(e.Accuracy);
+            if (e.Pp > 0) line += "  <color=#B856FF>" + e.Pp.ToString("0", CultureInfo.InvariantCulture) + "<size=70%>pp</size></color>";
+            if (e.FullCombo) line += "  <color=#57FF8A>FC</color>";
+            if (!string.IsNullOrEmpty(e.Modifiers)) line += "  <color=#999999>+" + Escape(e.Modifiers) + "</color>";
+            return line;
+        }
+
+        // The detail modal's text block: big song title, muted byline,
+        // difficulty/stars, stats, then how long ago the score was set.
+        public static string DetailText(FeedEntry e)
+        {
+            var info = "<size=140%><b>" + Escape(e.SongName) + "</b></size>";
+
+            if (!string.IsNullOrEmpty(e.SongAuthor) || !string.IsNullOrEmpty(e.Mapper))
+            {
+                var byline = Escape(e.SongAuthor);
+                if (!string.IsNullOrEmpty(e.Mapper))
+                    byline += (string.IsNullOrEmpty(byline) ? "[" : " [") + Escape(e.Mapper) + "]";
+                info += "\n<color=#888888>" + byline + "</color>";
+            }
+
+            var diffLine = DiffAndStars(e, "75%");
+            if (!string.IsNullOrEmpty(diffLine))
+                info += "\n<size=85%>" + diffLine.TrimStart() + "</size>";
+
+            info += "\n" + StatsLine(e);
+
             var ago = TimeAgo(e.Timepost);
-            if (!string.IsNullOrEmpty(ago)) stats += "  <color=#8899AA>" + ago + "</color>";
-            return stats;
+            if (!string.IsNullOrEmpty(ago))
+                info += "\n<size=75%><color=#777777>" + ago + "</color></size>";
+            return info;
         }
 
-        public static string Detail(FeedEntry e)
+        private static string DiffAndStars(FeedEntry e, string size)
         {
-            var byline = e.SongAuthor ?? "";
-            if (!string.IsNullOrEmpty(e.Mapper)) byline += (string.IsNullOrEmpty(byline) ? "[" : " [") + e.Mapper + "]";
-            var detail = "<size=130%><b>" + Escape(e.SongName) + "</b></size>";
-            if (!string.IsNullOrEmpty(byline)) detail += "\n<color=#8899AA>" + Escape(byline) + "</color>";
-            detail += "\n" + SubLine(e);
-            return detail;
+            var line = "";
+            if (!string.IsNullOrEmpty(e.Difficulty))
+                line += "  <size=" + size + "><color=" + DiffColor(e.Difficulty) + ">" + DiffLabel(e.Difficulty) + "</color></size>";
+            if (e.Stars > 0)
+                line += "  <size=" + size + "><color=#FFB921>" + e.Stars.ToString("0.0", CultureInfo.InvariantCulture) + "★</color></size>";
+            return line;
         }
 
-        private static string FormatAcc(float acc) => "<color=#FF8C29>" + (acc * 100f).ToString("0.00") + "%</color>";
+        private static string FormatAcc(float acc) => "<color=#FF8C29>" + (acc * 100f).ToString("0.00", CultureInfo.InvariantCulture) + "%</color>";
+
         private static string DiffLabel(string diff) => diff == "ExpertPlus" ? "Expert+" : diff;
 
         private static string DiffColor(string diff)

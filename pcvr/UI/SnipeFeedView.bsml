@@ -1,25 +1,108 @@
 <bg xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
     xsi:noNamespaceSchemaLocation='https://monkeymanboy.github.io/BSML-Docs/BSMLSchema.xsd'>
-  <vertical spacing='0.7' child-control-width='true' child-expand-width='false'>
-    <horizontal spacing='1' child-control-width='true' child-expand-width='false'>
-      <dropdown-list-setting id='player-filter' text='' options='filter-options' value='selected-filter' apply-on-change='true' />
-      <increment-setting text='Scores' value='feed-count' min='10' max='100' increment='10' integer-only='true' apply-on-change='true' />
-      <button text='Refresh' on-click='refresh' />
+
+  <!-- The gameplay setup tab area is roughly 90x46 units. Everything is
+       pinned to the TOP of that box (child-align) so the content can never
+       spill above/below the panel; the list height is re-measured against
+       the real tab height at runtime (see SnipeFeedView.ResizeListToTab). -->
+  <vertical id='root'
+            child-control-width='true' child-control-height='true'
+            child-expand-width='false' child-expand-height='false'
+            child-align='UpperCenter' spacing='0.5'>
+
+    <!-- Single control row: player filter, scores-to-pull, refresh.
+         The dropdown and increment controls are compacted in code
+         (PostParse) because the stock prefabs assume a 90-wide row. -->
+    <horizontal pref-width='88' pref-height='8' spacing='1'
+                child-control-width='true' child-control-height='true'
+                child-expand-width='false' child-align='MiddleLeft'>
+      <dropdown-list-setting id='player-filter' text='' pref-width='36'
+                             hover-hint='Show scores from one player'
+                             options='filter-options' value='selected-filter'
+                             apply-on-change='true'/>
+      <increment-setting id='feed-count-setting' text='' pref-width='28'
+                         hover-hint='How many recent scores to pull (10-100)'
+                         value='feed-count' integer-only='true'
+                         min='10' max='100' increment='10'
+                         apply-on-change='true'/>
+      <button text='Refresh' on-click='refresh'/>
     </horizontal>
 
-    <string-setting text='BeatLeader ID fallback' value='player-id' apply-on-change='true' />
-    <text id='status' text='Loading...' font-size='2.5' align='Center' word-wrapping='true' />
+    <!-- Secondary info line: small and muted so the score rows stay the
+         visual focus. The wrapper pins the width so long error messages
+         wrap instead of stretching the whole tab. -->
+    <horizontal pref-width='88' min-height='3.5'
+                child-control-width='true' child-control-height='true'
+                child-expand-width='true'>
+      <text id='status' text='Loading...' font-size='2.4' color='#9EAEC2'
+            align='Center' word-wrapping='true'/>
+    </horizontal>
 
-    <list id='feed-list'
-          data='feed-cells'
-          select-cell='select-score'
-          visible-cells='4.25'
-          cell-size='9.5'
-          list-width='90'
-          expand-cell='true'
-          show-scrollbar='true' />
-
-    <text id='detail-text' text='Select a score to see details.' font-size='2.5' align='Center' word-wrapping='true' />
-    <button id='play-button' text='Select a score' on-click='play-selected' interactable='false' />
+    <!-- BeatLeader-style rows: rank, cover, song line over
+         avatar + player + stats + time, chevron. Images are loaded by
+         FeedRow through the SpriteCache. -->
+    <custom-list id='feed-list' contents='feed-cells' select-cell='select-score'
+                 cell-size='10.5' visible-cells='3.1' list-width='86'
+                 clickable-cells='true' show-scrollbar='true'>
+      <horizontal bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2'
+                  vertical-fit='Unconstrained'
+                  child-control-width='true' child-control-height='true'
+                  child-expand-width='false' child-align='MiddleLeft'>
+        <horizontal pref-width='3.5' child-control-width='true'
+                    child-expand-width='true'>
+          <text text='~rank-text' font-size='3' align='Center'
+                word-wrapping='false'/>
+        </horizontal>
+        <image id='cover-image' pref-width='8.5' pref-height='8.5'
+               min-width='8.5' preserve-aspect='true'/>
+        <vertical spacing='0' pref-width='52' flexible-width='1000'
+                  child-control-width='true' child-control-height='true'
+                  child-expand-width='false' child-expand-height='false'>
+          <text text='~song-text' font-size='3.4' align='MidlineLeft'
+                overflow-mode='Ellipsis' word-wrapping='false'/>
+          <horizontal spacing='1.5' pref-height='4.2'
+                      child-control-width='true' child-control-height='true'
+                      child-expand-width='false' child-align='MiddleLeft'>
+            <image id='avatar-image' pref-width='3.5' pref-height='3.5'
+                   min-width='3.5' preserve-aspect='true'/>
+            <text text='~player-text' font-size='2.8' align='MidlineLeft'
+                  word-wrapping='false'/>
+            <text text='~stats-text' font-size='2.6' align='MidlineLeft'
+                  word-wrapping='false'/>
+            <text text='~time-text' font-size='2.4' color='#8899AA'
+                  align='MidlineLeft' word-wrapping='false'/>
+          </horizontal>
+        </vertical>
+        <text text='&gt;' font-size='4' color='#5A6B7A' align='Center'
+              word-wrapping='false'/>
+        <horizontal tags='hovered' active='false' ignore-layout='true'
+                    vertical-fit='Unconstrained'
+                    bg='round-rect-panel' bg-color='#FFFFFF12'/>
+      </horizontal>
+    </custom-list>
   </vertical>
+
+  <!-- Detail modal, BeatLeader style: cover + song text on top,
+       avatar + player row, then the play button. -->
+  <modal id='detail-modal' size-delta='76 46' click-off-closes='true'>
+    <vertical pad='2' spacing='1'
+              horizontal-fit='Unconstrained' vertical-fit='Unconstrained'
+              child-control-width='true' child-control-height='true'
+              child-expand-width='true' child-expand-height='false'>
+      <horizontal spacing='2' child-control-width='true'
+                  child-control-height='true' child-expand-width='false'>
+        <image id='modal-cover' pref-width='16' pref-height='16'
+               min-width='16' min-height='16' preserve-aspect='true'/>
+        <text id='modal-detail' text='' font-size='3' align='TopLeft'
+              word-wrapping='true'/>
+      </horizontal>
+      <horizontal spacing='1.5' child-control-width='true'
+                  child-control-height='true' child-expand-width='false'>
+        <image id='modal-avatar' pref-width='4' pref-height='4'
+               min-width='4' min-height='4' preserve-aspect='true'/>
+        <text id='modal-player' text='' font-size='3' align='MidlineLeft'/>
+      </horizontal>
+      <button id='play-button' text='Play' on-click='play-selected'/>
+    </vertical>
+  </modal>
 </bg>

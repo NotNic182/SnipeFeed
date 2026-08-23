@@ -1,3 +1,4 @@
+using HMUI;
 using Newtonsoft.Json;
 using SongCore;
 using System;
@@ -131,6 +132,54 @@ namespace SnipeFeed.PC.Services
             Loader.SongsLoadedEvent -= handler;
             if (finished != completion.Task)
                 Plugin.Log?.Warn("Timed out waiting for SongCore refresh; the map may appear a little later.");
+        }
+
+        // Mirrors the Quest mod's Installer (itself modeled on BeatLeader's
+        // MapDownloadDialog.OpenMap), split in two: priming stores the
+        // level selection on the solo flow coordinator (applied on its next
+        // activation), pressing the Solo button only works once the main
+        // menu is visible again.
+        public static bool PrimeSoloFlow(BeatmapLevel level)
+        {
+            if (level == null) return false;
+
+            var customLevelsPack = Loader.CustomLevelsPack;
+            if (customLevelsPack == null || customLevelsPack._beatmapLevels == null || customLevelsPack._beatmapLevels.Length == 0)
+                return false;
+
+            var soloFlowCoordinator = Resources.FindObjectsOfTypeAll<SoloFreePlayFlowCoordinator>().FirstOrDefault();
+            if (soloFlowCoordinator == null)
+            {
+                Plugin.Log?.Error("SoloFreePlayFlowCoordinator not found");
+                return false;
+            }
+
+            var state = new LevelSelectionFlowCoordinator.State(
+                SelectLevelCategoryViewController.LevelCategory.All, customLevelsPack, default, level);
+            soloFlowCoordinator.Setup(state);
+            return true;
+        }
+
+        public static bool PressSoloButton()
+        {
+            var songSelectButton = GameObject.Find("SoloButton")
+                ?? GameObject.Find("Wrapper/BeatmapWithModifiers/BeatmapSelection/EditButton");
+            if (songSelectButton == null)
+            {
+                Plugin.Log?.Error("Could not find the solo menu button to press");
+                return false;
+            }
+
+            var button = songSelectButton.GetComponent<NoTransitionsButton>()
+                ?? songSelectButton.GetComponentInChildren<NoTransitionsButton>();
+            if (button == null)
+            {
+                Plugin.Log?.Error("Solo menu object found but has no NoTransitionsButton");
+                return false;
+            }
+
+            button.onClick.Invoke();
+            return true;
         }
 
         private static SongInstallResult Fail(string error) => new SongInstallResult { Success = false, Error = error };

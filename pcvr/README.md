@@ -8,7 +8,7 @@ The Quest project remains untouched in the repository root. This folder is a sep
 
 - Adds **Snipe Feed** to the gameplay setup panel's **Mods** tabs (`MenuType.All`), sized to fit the tab area.
 - Reads the same BeatLeader friends feed used by the Quest version.
-- If the official **BeatLeader PC mod** is installed, SnipeFeed reuses its automatic sign-in: it waits briefly for the mod's login to finish, copies the session cookies read-only, and calls `/user/friendScores` on whichever BeatLeader server (`.com` or `.net`) the mod is configured to use.
+- If the official **BeatLeader PC mod** is installed, SnipeFeed reuses its automatic sign-in: it waits briefly for the mod's login to finish, then calls `/user/friendScores` on whichever BeatLeader server (`.com` or `.net`) the mod is configured to use. Newer BeatLeader versions keep the login in a managed cookie container that is copied read-only; 0.9.x versions sign in through UnityWebRequest, whose process-wide cookie cache authenticates SnipeFeed's request automatically.
 - Falls back to the public BeatLeader API using the `PlayerId` (ID or alias) configured in `UserData/SnipeFeedPC.json`.
 - Loads followed players' recent scores in parallel (maximum 4 requests at once), sorts newest first, and keeps a 2-minute in-memory cache.
 - BeatLeader-style score rows: rank, cover art, "Song - Artist [mapper]" with colored difficulty and stars, avatar, player name, accuracy/PP/FC/modifiers, and time-ago. Cover art and avatars are cached, coalesced, and retried after the next successful refresh.

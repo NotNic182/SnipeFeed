@@ -47,22 +47,33 @@
       <horizontal bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2'
                   vertical-fit='Unconstrained'
                   child-control-width='true' child-control-height='true'
-                  child-expand-width='false' child-align='MiddleLeft'>
-        <horizontal pref-width='3.5' child-control-width='true'
+                  child-expand-width='false' child-expand-height='false'
+                  child-align='MiddleLeft'>
+        <horizontal pref-width='4.5' child-control-width='true'
                     child-expand-width='true'>
           <text text='~rank-text' font-size='3' align='Center'
                 word-wrapping='false'/>
         </horizontal>
         <image id='cover-image' pref-width='8.5' pref-height='8.5'
-               min-width='8.5' preserve-aspect='true'/>
-        <vertical spacing='0' pref-width='52' flexible-width='1000'
+               min-width='8.5' min-height='8.5' preserve-aspect='true'/>
+        <vertical spacing='0' pref-width='50' flexible-width='1000'
                   child-control-width='true' child-control-height='true'
                   child-expand-width='false' child-expand-height='false'>
-          <text text='~song-text' font-size='3.4' align='MidlineLeft'
-                overflow-mode='Ellipsis' word-wrapping='false'/>
-          <horizontal spacing='1.5' pref-height='4.2'
+          <!-- TMP's Ellipsis mode also ellipsizes VERTICALLY: when a line is
+               even slightly taller than its rect, the WHOLE line is culled
+               (the Quest mod shipped this exact bug once). These wrappers
+               pin safe heights (font 3.4 needs ~4.4, font 2.8 needs ~3.6)
+               so the height math can never squeeze a line out of existence. -->
+          <horizontal pref-height='4.6' min-height='4.6'
                       child-control-width='true' child-control-height='true'
-                      child-expand-width='false' child-align='MiddleLeft'>
+                      child-expand-width='true' child-expand-height='true'>
+            <text text='~song-text' font-size='3.4' align='MidlineLeft'
+                  overflow-mode='Ellipsis' word-wrapping='false'/>
+          </horizontal>
+          <horizontal spacing='1.5' pref-height='3.9' min-height='3.9'
+                      child-control-width='true' child-control-height='true'
+                      child-expand-width='false' child-expand-height='false'
+                      child-align='MiddleLeft'>
             <image id='avatar-image' pref-width='3.5' pref-height='3.5'
                    min-width='3.5' preserve-aspect='true'/>
             <text text='~player-text' font-size='2.8' align='MidlineLeft'

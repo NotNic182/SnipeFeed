@@ -29,7 +29,7 @@ fi
 
 # Basic tooling. qpm is already expected to be installed; it is only used for the NDK.
 missing=()
-for c in git curl cmake ninja python3 zip qpm; do
+for c in git curl cmake ninja python3 zip make qpm; do
   command -v "$c" >/dev/null 2>&1 || missing+=("$c")
 done
 if ((${#missing[@]})); then
@@ -37,10 +37,10 @@ if ((${#missing[@]})); then
   if [[ "$(id -u)" -eq 0 ]] && command -v apt-get >/dev/null 2>&1; then
     echo "Installing standard build tools..."
     apt-get update
-    apt-get install -y git curl cmake ninja-build python3 zip ca-certificates
+    apt-get install -y git curl cmake ninja-build python3 zip make ca-certificates
   fi
 fi
-for c in git curl cmake ninja python3 zip qpm; do
+for c in git curl cmake ninja python3 zip make qpm; do
   command -v "$c" >/dev/null 2>&1 || { echo "ERROR: $c is still missing"; exit 1; }
 done
 
@@ -101,13 +101,14 @@ mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/baselib/Include"
 mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/baselib/Platforms/Android/Include"
 
 # Unity's libil2cpp references Google's sparsehash using Unity's historical
-# *.h filenames. Generate sparsehash's config header, then create wrappers for
-# those historical filenames.
+# *.h filenames. Generate sparsehash's internal config header, then create
+# wrappers for those historical filenames.
 echo "-- headers: google sparsehash compatibility"
 git clone -q --depth 1 https://github.com/sparsehash/sparsehash.git "$TMP/sparsehash-upstream"
 (
   cd "$TMP/sparsehash-upstream"
   ./configure >/dev/null
+  make -s src/sparsehash/internal/sparseconfig.h
 )
 mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/google/sparsehash"
 printf '%s\n' '#pragma once' '#include <sparsehash/sparse_hash_map>' > "$ROOT/extern/includes/libil2cpp/il2cpp/external/google/sparsehash/sparse_hash_map.h"

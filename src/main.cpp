@@ -25,8 +25,9 @@ MOD_EXPORT void late_load() {
     BSML::Init();
     // Lives in the gameplay setup panel's Mods section (left screen of the
     // Solo song selection), alongside tabs like ReeSabers and Qounters++.
-    // MenuType::Solo also covers Party (both use the single player flow).
-    BSML::Register::RegisterGameplaySetupTab("Snipe Feed", SnipeFeed::FeedView::TabActivated, BSML::MenuType::Solo);
+    // All = Solo/Party + Online (multiplayer) + Campaign + Custom
+    // (mod-provided flows like Multiplayer+).
+    BSML::Register::RegisterGameplaySetupTab("Snipe Feed", SnipeFeed::FeedView::TabActivated, BSML::MenuType::All);
 
     SnipeFeedLogger.info("SnipeFeed {} loaded! Game version: {}", VERSION, "1.40.8");
 }

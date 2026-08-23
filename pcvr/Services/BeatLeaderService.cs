@@ -34,11 +34,19 @@ namespace SnipeFeed.PC.Services
             try
             {
                 progress?.Invoke("Loading your BeatLeader friends feed...");
-                var friendEntries = await TryFetchAuthenticatedFriendScores(feedCount, progress);
+                var (friendEntries, rateLimited) = await TryFetchAuthenticatedFriendScores(feedCount, progress);
                 if (friendEntries != null && friendEntries.Count > 0)
                 {
                     result.Entries = friendEntries.OrderByDescending(x => x.Timepost).Take(feedCount).ToList();
                     result.Success = true;
+                    return result;
+                }
+
+                if (rateLimited)
+                {
+                    // The public fallback would hit the same rate limit;
+                    // don't turn one clear condition into a confusing error.
+                    result.Error = "BeatLeader is rate-limiting requests right now.\nWait a minute, then press Refresh.";
                     return result;
                 }
 
@@ -131,13 +139,13 @@ namespace SnipeFeed.PC.Services
             public CookieCollection Cookies;
         }
 
-        private static async Task<List<FeedEntry>> TryFetchAuthenticatedFriendScores(int count, Action<string> progress)
+        private static async Task<(List<FeedEntry> Entries, bool RateLimited)> TryFetchAuthenticatedFriendScores(int count, Action<string> progress)
         {
             var beatLeader = FindBeatLeaderAssembly();
             if (beatLeader == null)
             {
                 Plugin.Log?.Info("BeatLeader mod not found; using the public API fallback.");
-                return null;
+                return (null, false);
             }
 
             if (!IsBeatLeaderSignedIn(beatLeader) && TryGetBeatLeaderSession(beatLeader) == null)
@@ -146,38 +154,48 @@ namespace SnipeFeed.PC.Services
                 await WaitForBeatLeaderLogin(beatLeader);
             }
 
+            var rateLimited = false;
+
             // Newer BeatLeader versions keep the login in a managed cookie
             // container we can copy read-only into our own client.
             var session = TryGetBeatLeaderSession(beatLeader);
             if (session != null)
             {
-                var viaCookies = await FetchFriendScoresWithCookies(session, count);
+                var (viaCookies, cookieStatus) = await FetchFriendScoresWithCookies(session, count);
                 if (viaCookies != null)
                 {
                     Plugin.Log?.Info("Loaded the friends feed with the BeatLeader session cookies (" + session.ApiBase + ").");
-                    return viaCookies;
+                    return (viaCookies, false);
                 }
+                rateLimited |= cookieStatus == 429;
             }
 
             // Older versions (0.9.x) sign in through UnityWebRequest, whose
             // engine-level cookie cache is shared process-wide — a
             // UnityWebRequest from us to the same server carries the login
             // automatically. Without a login the request just returns 401.
-            foreach (var apiBase in CandidateApiBases(beatLeader))
+            // Only the server the mod is signed into is worth a request;
+            // the mirrors are tried solely when the config can't be read.
+            var configured = TryGetConfiguredApiBase(beatLeader);
+            var unityBases = configured != null ? new[] { configured } : KnownApiBases;
+            foreach (var apiBase in unityBases)
             {
-                var viaUnity = await FetchFriendScoresViaUnity(apiBase, count);
+                var (viaUnity, unityStatus) = await FetchFriendScoresViaUnity(apiBase, count);
                 if (viaUnity != null)
                 {
                     Plugin.Log?.Info("Loaded the friends feed through the Unity cookie cache (" + apiBase + ").");
-                    return viaUnity;
+                    return (viaUnity, false);
                 }
+                rateLimited |= unityStatus == 429;
             }
 
-            Plugin.Log?.Info("BeatLeader is installed but no reusable login was found; using the public API fallback.");
-            return null;
+            Plugin.Log?.Info(rateLimited
+                ? "BeatLeader is rate-limiting requests; try again shortly."
+                : "BeatLeader is installed but no reusable login was found; using the public API fallback.");
+            return (null, rateLimited);
         }
 
-        private static async Task<List<FeedEntry>> FetchFriendScoresWithCookies(BeatLeaderSession session, int count)
+        private static async Task<(List<FeedEntry> Entries, long Status)> FetchFriendScoresWithCookies(BeatLeaderSession session, int count)
         {
             // Copy the cookies read-only so we never mutate the BeatLeader
             // mod's own session state.
@@ -198,14 +216,14 @@ namespace SnipeFeed.PC.Services
                 if (!response.IsSuccessStatusCode)
                 {
                     Plugin.Log?.Info("friendScores via the BeatLeader session cookies returned HTTP " + (int)response.StatusCode + ".");
-                    return null;
+                    return (null, (long)response.StatusCode);
                 }
 
-                return ParseFriendScores(await response.Content.ReadAsStringAsync());
+                return (ParseFriendScores(await response.Content.ReadAsStringAsync()), 200);
             }
         }
 
-        private static async Task<List<FeedEntry>> FetchFriendScoresViaUnity(string apiBase, int count)
+        private static async Task<(List<FeedEntry> Entries, long Status)> FetchFriendScoresViaUnity(string apiBase, int count)
         {
             try
             {
@@ -219,16 +237,16 @@ namespace SnipeFeed.PC.Services
                     if (request.responseCode != 200)
                     {
                         Plugin.Log?.Info("friendScores via the Unity cookie cache returned HTTP " + request.responseCode + " on " + apiBase + ".");
-                        return null;
+                        return (null, request.responseCode);
                     }
 
-                    return ParseFriendScores(request.downloadHandler.text);
+                    return (ParseFriendScores(request.downloadHandler.text), 200);
                 }
             }
             catch (Exception ex)
             {
-                Plugin.Log?.Debug("Unity web request for friendScores failed: " + ex.Message);
-                return null;
+                Plugin.Log?.Info("Unity web request for friendScores failed: " + ex.Message);
+                return (null, 0);
             }
         }
 
@@ -237,12 +255,22 @@ namespace SnipeFeed.PC.Services
 
         private static List<FeedEntry> ParseFriendScores(string body)
         {
-            var page = JsonConvert.DeserializeObject<ScorePageDto>(body);
-            if (page?.data == null) return null;
+            try
+            {
+                var page = JsonConvert.DeserializeObject<ScorePageDto>(body);
+                if (page?.data == null) return null;
 
-            var unknown = new PlayerDto { name = "?" };
-            var entries = page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
-            return entries.Count > 0 ? entries : null;
+                var unknown = new PlayerDto { name = "?" };
+                var entries = page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
+                return entries.Count > 0 ? entries : null;
+            }
+            catch (Exception ex)
+            {
+                // A parse failure after a successful request must be loud —
+                // it means the feed WAS fetched and then thrown away.
+                Plugin.Log?.Info("Couldn't parse the friends feed response: " + ex.Message);
+                return null;
+            }
         }
 
         // Old BeatLeader versions have no WaitLogin task, only this flag.
@@ -331,26 +359,30 @@ namespace SnipeFeed.PC.Services
             return null;
         }
 
-        // The server BeatLeader is actually signed into, first from its own
+        // The server BeatLeader is actually signed into, from its own
         // BLConstants (a property in current versions, a const field in old
-        // ones), then the known mirrors.
-        private static IEnumerable<string> CandidateApiBases(Assembly beatLeader)
+        // ones). Null when the reflection doesn't line up.
+        private static string TryGetConfiguredApiBase(Assembly beatLeader)
         {
             const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-            string configured = null;
             try
             {
                 var constants = beatLeader.GetType("BeatLeader.Utils.BLConstants", false);
-                configured = (constants?.GetProperty("BEATLEADER_API_URL", flags)?.GetValue(null)
+                var configured = (constants?.GetProperty("BEATLEADER_API_URL", flags)?.GetValue(null)
                     ?? constants?.GetField("BEATLEADER_API_URL", flags)?.GetValue(null)) as string;
                 configured = configured?.TrimEnd('/');
+                return string.IsNullOrEmpty(configured) ? null : configured;
             }
             catch
             {
-                // Fall through to the known mirrors.
+                return null;
             }
+        }
 
-            if (!string.IsNullOrEmpty(configured)) yield return configured;
+        private static IEnumerable<string> CandidateApiBases(Assembly beatLeader)
+        {
+            var configured = TryGetConfiguredApiBase(beatLeader);
+            if (configured != null) yield return configured;
             foreach (var known in KnownApiBases)
             {
                 if (!string.Equals(known, configured, StringComparison.OrdinalIgnoreCase))
@@ -396,8 +428,8 @@ namespace SnipeFeed.PC.Services
             var difficulty = score.leaderboard?.difficulty ?? new DifficultyDto();
 
             long timestamp = 0;
-            if (score.timepost > 0)
-                timestamp = (long)score.timepost;
+            if ((score.timepost ?? 0) > 0)
+                timestamp = (long)score.timepost.Value;
             else if (!string.IsNullOrEmpty(score.timeset))
                 long.TryParse(score.timeset, out timestamp);
 
@@ -412,11 +444,11 @@ namespace SnipeFeed.PC.Services
                 SongHash = song.hash ?? "",
                 CoverUrl = song.coverImage ?? "",
                 Difficulty = difficulty.difficultyName ?? "",
-                Stars = (float)difficulty.stars,
-                Accuracy = (float)score.accuracy,
-                Pp = (float)score.pp,
+                Stars = (float)(difficulty.stars ?? 0),
+                Accuracy = (float)(score.accuracy ?? 0),
+                Pp = (float)(score.pp ?? 0),
                 Modifiers = score.modifiers ?? "",
-                FullCombo = score.fullCombo,
+                FullCombo = score.fullCombo ?? false,
                 Timepost = timestamp
             };
         }
@@ -429,21 +461,25 @@ namespace SnipeFeed.PC.Services
             return input.Trim();
         }
 
+        // Every value-typed field is nullable: BeatLeader sends null for
+        // several of them (stars on unranked maps, pp, timepost, ...), and a
+        // single null into a non-nullable field makes Newtonsoft throw away
+        // the ENTIRE response.
         private sealed class ScorePageDto { public List<ScoreDto> data { get; set; } }
         private sealed class PlayerDto { public string id { get; set; } public string name { get; set; } public string avatar { get; set; } }
         private sealed class ScoreDto
         {
             public PlayerDto player { get; set; }
-            public double accuracy { get; set; }
-            public double pp { get; set; }
+            public double? accuracy { get; set; }
+            public double? pp { get; set; }
             public string modifiers { get; set; }
-            public double timepost { get; set; }
+            public double? timepost { get; set; }
             public string timeset { get; set; }
-            public bool fullCombo { get; set; }
+            public bool? fullCombo { get; set; }
             public LeaderboardDto leaderboard { get; set; }
         }
         private sealed class LeaderboardDto { public SongDto song { get; set; } public DifficultyDto difficulty { get; set; } }
         private sealed class SongDto { public string name { get; set; } public string author { get; set; } public string mapper { get; set; } public string hash { get; set; } public string coverImage { get; set; } }
-        private sealed class DifficultyDto { public string difficultyName { get; set; } public double stars { get; set; } }
+        private sealed class DifficultyDto { public string difficultyName { get; set; } public double? stars { get; set; } }
     }
 }

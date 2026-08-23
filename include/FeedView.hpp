@@ -52,4 +52,8 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
 
    private:
     void BuildUI();
+
+    // How many frames DidActivate has deferred waiting for the tab's
+    // RectTransform to get its real height (il2cpp zero-initializes this).
+    int buildAttempts;
 };

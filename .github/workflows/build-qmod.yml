@@ -1,0 +1,58 @@
+name: Build SnipeFeed QMOD
+
+on:
+  push:
+    branches:
+      - chatgpt-qmod-build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install QPM CLI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p /tmp/qpm
+          gh release download v1.5.11 --repo QuestPackageManager/QPM.CLI --pattern 'qpm-linux-x64.zip' --dir /tmp/qpm
+          unzip -o /tmp/qpm/qpm-linux-x64.zip -d /tmp/qpm
+          chmod +x /tmp/qpm/qpm
+          echo "/tmp/qpm" >> "$GITHUB_PATH"
+
+      - name: QPM info
+        run: qpm --help | head -40
+
+      - name: Restore dependencies
+        run: qpm restore
+
+      - name: Resolve Android NDK
+        run: qpm ndk resolve -d
+
+      - name: Build native library
+        run: qpm s build
+
+      - name: Regenerate qmod manifest
+        run: qpm qmod manifest
+
+      - name: Package qmod
+        run: qpm s qmod
+
+      - name: Verify output
+        shell: bash
+        run: |
+          ls -lah SnipeFeed.qmod build/libsnipefeed.so
+          unzip -l SnipeFeed.qmod
+
+      - name: Upload qmod
+        uses: actions/upload-artifact@v4
+        with:
+          name: SnipeFeed-qmod
+          path: SnipeFeed.qmod
+          if-no-files-found: error

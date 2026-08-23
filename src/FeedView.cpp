@@ -65,12 +65,12 @@ namespace {
     // panel's tab area is far smaller than a full screen (Qounters++ sizes
     // its rows to 85 units there), so everything below is sized to fit
     // roughly 90x46.
-    constexpr float CONTENT_WIDTH = 88.0f;
+    constexpr float CONTENT_WIDTH = 90.0f;
     // Vertical space reserved above the list for the control row + status
     // line. The list itself stretches from here to the tab's real bottom
     // edge (anchor-driven), so it fills whatever height the gameplay setup
     // panel actually provides instead of guessing it.
-    constexpr float HEADER_HEIGHT = 15.0f;
+    constexpr float HEADER_HEIGHT = 13.5f;
 }
 
 void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActivation) {
@@ -455,7 +455,7 @@ void FeedView::BuildUI() {
         listRect->set_anchorMax({0.5f, 1.0f});
         listRect->set_pivot({0.5f, 1.0f});
         listRect->set_offsetMax({CONTENT_WIDTH / 2.0f, -HEADER_HEIGHT});
-        listRect->set_offsetMin({-CONTENT_WIDTH / 2.0f, 1.0f});
+        listRect->set_offsetMin({-CONTENT_WIDTH / 2.0f, 0.5f});
     }
 
     // Center the page up/down arrows over the rows; stock placement

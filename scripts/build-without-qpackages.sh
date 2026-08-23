@@ -15,6 +15,7 @@ if [[ -r /proc/meminfo ]] && command -v swapon >/dev/null 2>&1; then
   swap_kb="$(awk '/SwapTotal:/ {print $2}' /proc/meminfo)"
   if [[ "${mem_kb:-0}" -lt 1000000 && "${swap_kb:-0}" -lt 1000000 && "$(id -u)" -eq 0 ]]; then
     echo "Adding 2 GB swap for this low-memory VM..."
+    rm -f /swapfile
     if command -v fallocate >/dev/null 2>&1; then
       fallocate -l 2G /swapfile
     else
@@ -100,10 +101,14 @@ mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/baselib/Include"
 mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/baselib/Platforms/Android/Include"
 
 # Unity's libil2cpp references Google's sparsehash using Unity's historical
-# *.h filenames. The maintained sparsehash source provides the same templates
-# without those suffixes, so create two tiny compatibility wrappers.
+# *.h filenames. Generate sparsehash's config header, then create wrappers for
+# those historical filenames.
 echo "-- headers: google sparsehash compatibility"
 git clone -q --depth 1 https://github.com/sparsehash/sparsehash.git "$TMP/sparsehash-upstream"
+(
+  cd "$TMP/sparsehash-upstream"
+  ./configure >/dev/null
+)
 mkdir -p "$ROOT/extern/includes/libil2cpp/il2cpp/external/google/sparsehash"
 printf '%s\n' '#pragma once' '#include <sparsehash/sparse_hash_map>' > "$ROOT/extern/includes/libil2cpp/il2cpp/external/google/sparsehash/sparse_hash_map.h"
 printf '%s\n' '#pragma once' '#include <sparsehash/dense_hash_map>' > "$ROOT/extern/includes/libil2cpp/il2cpp/external/google/sparsehash/dense_hash_map.h"

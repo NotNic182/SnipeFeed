@@ -195,16 +195,22 @@ void FeedView::OnCellClicked(int listIdx) {
         });
     }
 
+    // In a lobby (no song-select screen open) we can download maps but not
+    // launch them — launching would require hijacking the lobby's flow.
+    auto nav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
+    bool canLaunchHere = nav && nav->get_isActiveAndEnabled();
+    bool installed = !e.songHash.empty() && Installer::GetInstalledLevel(e.songHash);
+
     if (playButtonText) {
         if (e.songHash.empty())
             playButtonText->set_text("Not a custom song");
-        else if (Installer::GetInstalledLevel(e.songHash))
-            playButtonText->set_text("Play");
+        else if (installed)
+            playButtonText->set_text(canLaunchHere ? "Play" : "In Custom Levels");
         else
-            playButtonText->set_text("Download & Play");
+            playButtonText->set_text(canLaunchHere ? "Download & Play" : "Download");
     }
     if (playButton)
-        playButton->set_interactable(!e.songHash.empty() && !state.busyPlaying);
+        playButton->set_interactable(!e.songHash.empty() && !state.busyPlaying && (canLaunchHere || !installed));
 
     if (detailModal)
         detailModal->Show();
@@ -235,27 +241,13 @@ void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
         return;
     }
 
-    // Fallback (e.g. multiplayer lobby where song select is not open yet):
-    // prime the solo flow coordinator while it can still be found, then
-    // back out and re-enter Solo with the level selected.
-    if (!Installer::PrimeSoloFlow(level)) return;
-
-    // Our tab lives in the gameplay setup panel inside the solo song
-    // selection flow. Back out to the main menu first, then press the real
-    // Solo button so the game re-enters song selection with our level up.
-    auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
-    HMUI::FlowCoordinator* youngest = mainFC->YoungestChildFlowCoordinatorOrSelf();
-    if (youngest && youngest != static_cast<HMUI::FlowCoordinator*>(mainFC) && youngest->_parentFlowCoordinator) {
-        HMUI::FlowCoordinator* parent = youngest->_parentFlowCoordinator;
-        parent->DismissFlowCoordinator(
-            youngest, HMUI::ViewController::AnimationDirection::Horizontal,
-            BSML::MakeSystemAction([]() {
-                Installer::PressSoloButton();
-            }),
-            false);
-    } else {
-        Installer::PressSoloButton();
-    }
+    // No song-select screen is open (e.g. a multiplayer / Multiplayer+
+    // lobby). NEVER hijack the solo flow from here — dismissing flow
+    // coordinators under an active lobby corrupts the menu state (main
+    // menu while still "in" the room, solo playback inside the lobby).
+    // The map is installed; just point the player at it.
+    if (statusText)
+        statusText->set_text("Map installed — pick it in the song picker (Custom Levels).");
 }
 
 void FeedView::PlaySelected() {

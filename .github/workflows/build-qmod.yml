@@ -33,7 +33,16 @@ jobs:
         run: qpm --help | head -40
 
       - name: Restore dependencies
-        run: qpm restore
+        shell: bash
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            echo "QPM restore attempt $attempt/6"
+            if qpm restore; then
+              exit 0
+            fi
+            sleep 12
+          done
+          exit 1
 
       - name: Resolve Android NDK
         run: qpm ndk resolve -d

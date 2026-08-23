@@ -15,9 +15,7 @@
 
 #include "songcore/shared/SongCore.hpp"
 
-#include "GlobalNamespace/BeatmapLevelPack.hpp"
 #include "GlobalNamespace/LevelCollectionNavigationController.hpp"
-#include "GlobalNamespace/LevelFilteringNavigationController.hpp"
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
 #include "GlobalNamespace/SoloFreePlayFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
@@ -58,6 +56,11 @@ namespace {
         int selected = -1;
         bool busyPlaying = false;
         long long lastFetchTime = 0;        // unix time of last successful fetch
+        // The most recently activated view (weak). Refresh completions
+        // update THIS, not the view that started the fetch — the tab
+        // GameObject is destroyed and recreated across menu visits, and a
+        // fetch begun by a dead view must still populate the live one.
+        UnityW<SnipeFeed::FeedView> activeView;
     };
     FeedState state;
 
@@ -71,10 +74,24 @@ namespace {
     // roughly 90x46.
     constexpr float CONTENT_WIDTH = 90.0f;
     // Vertical space reserved above the list for the control row + status
-    // line. The list itself stretches from here to the tab's real bottom
-    // edge (anchor-driven), so it fills whatever height the gameplay setup
-    // panel actually provides instead of guessing it.
+    // line; the list is created at (measured tab height - HEADER_HEIGHT).
+    // Hand-tuned to the header BuildUI creates — if you change the header's
+    // controls or fonts, retune this.
     constexpr float HEADER_HEIGHT = 13.5f;
+
+    // Where a Play can actually go right now. Computed in one place so the
+    // button state (OnCellClicked) and the launch path (LaunchLevel) can
+    // never drift apart.
+    bool IsSoloFlowOnTop() {
+        auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
+        HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
+        return youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
+    }
+
+    GlobalNamespace::LevelCollectionNavigationController* ActivePicker() {
+        auto nav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
+        return (nav && nav->get_isActiveAndEnabled()) ? nav : nullptr;
+    }
 }
 
 void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActivation) {
@@ -172,11 +189,11 @@ void FeedView::OnCellClicked(int listIdx) {
     modalPendingAvatar = e.avatarUrl;
     if (modalCover) {
         modalCover->set_sprite(nullptr);
-        modalCover->set_color({1.0f, 1.0f, 1.0f, 0.15f});
+        modalCover->set_color(FeedCell::PlaceholderTint());
     }
     if (modalAvatar) {
         modalAvatar->set_sprite(nullptr);
-        modalAvatar->set_color({1.0f, 1.0f, 1.0f, 0.15f});
+        modalAvatar->set_color(FeedCell::PlaceholderTint());
     }
     auto weakSelf = UnityW<FeedView>(this);
     if (!e.coverUrl.empty()) {
@@ -184,7 +201,7 @@ void FeedView::OnCellClicked(int listIdx) {
             if (!weakSelf || !weakSelf->modalCover) return;
             if (!weakSelf->modalPendingCover || static_cast<std::string>(weakSelf->modalPendingCover) != url) return;
             weakSelf->modalCover->set_sprite(sprite);
-            weakSelf->modalCover->set_color({1.0f, 1.0f, 1.0f, 1.0f});
+            weakSelf->modalCover->set_color(FeedCell::LoadedTint());
         });
     }
     if (!e.avatarUrl.empty()) {
@@ -192,18 +209,14 @@ void FeedView::OnCellClicked(int listIdx) {
             if (!weakSelf || !weakSelf->modalAvatar) return;
             if (!weakSelf->modalPendingAvatar || static_cast<std::string>(weakSelf->modalPendingAvatar) != url) return;
             weakSelf->modalAvatar->set_sprite(sprite);
-            weakSelf->modalAvatar->set_color({1.0f, 1.0f, 1.0f, 1.0f});
+            weakSelf->modalAvatar->set_color(FeedCell::LoadedTint());
         });
     }
 
     // Launching works when the solo flow is on top (re-entry) or a song
     // picker is showing (direct select). In a lobby neither holds: we can
     // download maps but not launch them.
-    auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
-    HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
-    bool soloOnTop = youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
-    auto nav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
-    bool canLaunchHere = soloOnTop || (nav && nav->get_isActiveAndEnabled());
+    bool canLaunchHere = IsSoloFlowOnTop() || ActivePicker() != nullptr;
     bool installed = !e.songHash.empty() && Installer::GetInstalledLevel(e.songHash);
 
     if (playButtonText) {
@@ -235,29 +248,34 @@ void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     // defaults. The game's own mechanism is re-entry — and that is only
     // safe when the SOLO flow is what's on top (never from a lobby, where
     // dismissing flows corrupts the menu state).
-    auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
-    HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
-    bool soloOnTop = youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
-    if (soloOnTop && youngest->_parentFlowCoordinator) {
-        if (!Installer::PrimeSoloFlow(level)) return;
-        SnipeFeedLogger.info("LaunchLevel: re-entering solo with {}", static_cast<std::string>(level->songName));
-        youngest->_parentFlowCoordinator->DismissFlowCoordinator(
-            youngest, HMUI::ViewController::AnimationDirection::Horizontal,
-            BSML::MakeSystemAction([]() {
-                Installer::PressSoloButton();
-            }),
-            false);
-        return;
+    if (IsSoloFlowOnTop()) {
+        HMUI::FlowCoordinator* youngest = BSML::Helpers::GetMainFlowCoordinator()->YoungestChildFlowCoordinatorOrSelf();
+        if (youngest->_parentFlowCoordinator) {
+            if (!Installer::PrimeSoloFlow(level)) {
+                // The modal is already hidden — leave SOME feedback instead
+                // of silently doing nothing.
+                if (statusText)
+                    statusText->set_text("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
+                return;
+            }
+            SnipeFeedLogger.info("LaunchLevel: re-entering solo with {}", static_cast<std::string>(level->songName));
+            youngest->_parentFlowCoordinator->DismissFlowCoordinator(
+                youngest, HMUI::ViewController::AnimationDirection::Horizontal,
+                BSML::MakeSystemAction([]() {
+                    Installer::PressSoloButton();
+                }),
+                false);
+            return;
+        }
     }
 
     // Multiplayer's own song-select screen: its Custom Levels list is the
     // one showing, so a plain SelectLevel works there (BetterSongSearch
     // uses the same call). Harmless no-op if the level isn't in the shown
     // list.
-    auto collectionNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
-    if (collectionNav && collectionNav->get_isActiveAndEnabled()) {
+    if (auto picker = ActivePicker()) {
         SnipeFeedLogger.info("LaunchLevel: selecting in active picker: {}", static_cast<std::string>(level->songName));
-        collectionNav->SelectLevel(level);
+        picker->SelectLevel(level);
         return;
     }
 
@@ -308,7 +326,14 @@ void FeedView::PlaySelected() {
                 if (weakSelf->playButton) weakSelf->playButton->set_interactable(true);
                 if (level) {
                     if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Play");
-                    weakSelf->LaunchLevel(level);
+                    // Only auto-launch if the user is still on this tab —
+                    // firing the solo re-entry while they browse another
+                    // tab or screen would yank them away without warning.
+                    if (weakSelf->get_isActiveAndEnabled()) {
+                        weakSelf->LaunchLevel(level);
+                    } else if (weakSelf->statusText) {
+                        weakSelf->statusText->set_text("Downloaded — press Play when you're back.");
+                    }
                 } else {
                     if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Download & Play");
                     if (weakSelf->detailText)
@@ -332,7 +357,6 @@ void FeedView::Refresh() {
 
     state.refreshInFlight.store(true);
     int generation = ++state.refreshGeneration;
-    auto weakSelf = UnityW<FeedView>(this);
 
     if (statusText) statusText->set_text("Loading...");
 
@@ -340,29 +364,35 @@ void FeedView::Refresh() {
     int scoresPerPlayer = std::clamp(getModConfig().ScoresPerPlayer.GetValue(), 1, 10);
     int feedCount = std::clamp(getModConfig().FeedCount.GetValue(), 10, 100);
 
+    // The callbacks deliberately use state.activeView (the most recently
+    // activated view) instead of capturing `this`: the tab GameObject can
+    // be destroyed and recreated while the fetch runs, and the results
+    // must land on whichever view is alive when they arrive.
     FetchFeedAsync(
         playerInput, maxPlayers, scoresPerPlayer, feedCount,
-        [weakSelf, generation](std::string progress) {
-            BSML::MainThreadScheduler::Schedule([weakSelf, generation, progress = std::move(progress)] {
+        [generation](std::string progress) {
+            BSML::MainThreadScheduler::Schedule([generation, progress = std::move(progress)] {
                 if (generation != state.refreshGeneration.load()) return;
-                if (weakSelf && weakSelf->statusText)
-                    weakSelf->statusText->set_text(progress);
+                auto view = state.activeView;
+                if (view && view->statusText)
+                    view->statusText->set_text(progress);
             });
         },
-        [weakSelf, generation](FeedResult result) {
+        [generation](FeedResult result) {
             state.refreshInFlight.store(false);
-            BSML::MainThreadScheduler::Schedule([weakSelf, generation, result = std::move(result)]() mutable {
+            BSML::MainThreadScheduler::Schedule([generation, result = std::move(result)]() mutable {
                 if (generation != state.refreshGeneration.load()) return;
 
                 if (!result.success) {
                     state.entries.clear();
                     state.players.clear();
                     state.selected = -1;
-                    if (weakSelf) {
-                        weakSelf->RebuildFilter();
-                        weakSelf->RebuildList();
-                        if (weakSelf->statusText)
-                            weakSelf->statusText->set_text(result.error);
+                    auto view = state.activeView;
+                    if (view) {
+                        view->RebuildFilter();
+                        view->RebuildList();
+                        if (view->statusText)
+                            view->statusText->set_text(result.error);
                     }
                     return;
                 }
@@ -385,10 +415,11 @@ void FeedView::Refresh() {
                 // current again — let previously-failed images retry.
                 SnipeFeed::SpriteCache::ClearFailures();
 
-                if (weakSelf) {
-                    weakSelf->RebuildFilter();
-                    weakSelf->RebuildList();
-                    if (weakSelf->detailModal) weakSelf->detailModal->Hide();
+                auto view = state.activeView;
+                if (view) {
+                    view->RebuildFilter();
+                    view->RebuildList();
+                    if (view->detailModal) view->detailModal->Hide();
                 }
             });
         });
@@ -562,6 +593,10 @@ void FeedView::DidActivate(bool firstActivation) {
         }
         BuildUI();
     }
+
+    // In-flight fetch results and progress land on the most recently
+    // activated view — that's us now.
+    state.activeView = UnityW<FeedView>(this);
 
     // Defensive: if a hide was ever interrupted (menu hop, tab switch),
     // clear the modal the moment the tab shows again.

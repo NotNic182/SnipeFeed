@@ -1,10 +1,25 @@
 # SnipeFeed
 
-Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of Solo song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
+Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
 
 - Target: **Beat Saber 1.40.8 (build 7379), Quest standalone (aarch64), Scotland2**
 - Dependencies (auto-installed from `mod.json`): beatsaber-hook, custom-types, paper2, BSML
 - Uses only public BeatLeader API endpoints — no login, no credentials stored
+
+## Where to find it
+
+The tab appears in the gameplay setup panel (left screen) in **every** mode — Solo/Party song selection, online multiplayer, campaign, and modded flows like **Multiplayer+** (QBeatSaberPlus) lobbies. Open the **Mods** tab on that panel and pick **Snipe Feed**.
+
+## What the Play button does (per mode)
+
+Tap any score row to open its details. The button at the bottom adapts to where you are:
+
+| Where you are | Button | What happens |
+|---|---|---|
+| Solo/Party song selection | **Play** / **Download & Play** | Downloads the map if needed, then the menu briefly hops out and back in with the sniped song selected, ready to play. |
+| Multiplayer song-select screen | **Play** / **Download & Play** | Selects the song directly in the open picker. |
+| A lobby (vanilla multiplayer or Multiplayer+) | **Download** / **In Custom Levels** | Downloads and installs the map only — the mod never yanks you out of a lobby. Then pick the song through the lobby's own song picker so the whole room gets it. |
+| Score on an official OST/DLC song | *(disabled)* | Official songs have no downloadable map. |
 
 ## Setup (one time)
 
@@ -12,7 +27,7 @@ Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed**
 2. Enter **Solo**, then on the left panel open the **Mods** tab and select **Snipe Feed**.
 3. If you are logged in inside the official BeatLeader mod, the feed loads automatically — nothing to enter. Then press **Refresh**.
 
-The value is saved to the mod config; after that the feed loads whenever you open the view.
+No BeatLeader mod login? Put your BeatLeader player ID into the mod's config file (`ModData/.../Configs/snipefeed.json`, `PlayerId`) and the feed uses the public API instead.
 
 ## Install
 
@@ -41,9 +56,12 @@ qpm s qmod       # packages SnipeFeed.qmod
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
 
-## v1.1.0 features
+## v2.0.0 features
 
-- **Moved into the gameplay setup panel**: the feed no longer lives behind a main-menu Mods button. It is now a **Snipe Feed** tab in the left panel's **Mods** section during Solo song selection, alongside tabs like ReeSabers and Qounters++ — check the feed right where you pick your next song. The layout was compacted to fit the panel (same control row, status line, score rows, and detail modal). **Play / Download & Play** still works from there: the game hops back to the main menu for a moment and re-enters Solo with the chosen song selected.
+- **Lives in the gameplay setup panel, everywhere**: the feed is a **Snipe Feed** tab in the left panel's **Mods** section — in Solo/Party, online multiplayer, campaign, and Multiplayer+ lobbies (`MenuType::All`). No more main-menu button.
+- **Full-height list**: the list is sized from the tab's actual measured height (60 units on 1.40.8) instead of a hardcoded guess — roughly 4½ compact rows, with working page arrows (they were being swallowed by the rows' touch surface).
+- **Mode-aware Play button**: in-place selection where a song picker is open, the quick re-enter hop in Solo, and download-only in lobbies — the mod never dismisses an active lobby flow (doing so corrupts the menu state; learned the hard way).
+- **Modal fixes**: the detail popup closes instantly when launching and can never linger across menu transitions.
 
 ## v1.0.0 features
 
@@ -65,7 +83,7 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 - **2-minute feed cache**: the feed is kept in memory between menu visits — reopening is instant. Press **Refresh** to force a reload from the API.
 - **Image caching**: song covers and player avatars are cached per session and downloaded once per URL.
 
-## Known limitations (v0.4.0)
+## Known limitations
 
 - Official OST/DLC map scores have no custom-song hash — their Play button is disabled ("Not a custom song").
 - Follows capped (default 20 players × 3 scores) in the public-API fallback path; the friends-feed path (BeatLeader login cookie) gets everything in one request.

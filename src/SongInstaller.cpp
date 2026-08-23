@@ -138,7 +138,14 @@ namespace SnipeFeed::Installer {
             SnipeFeedLogger.error("Could not find the solo menu button to press");
             return false;
         }
-        songSelectButton->GetComponent<HMUI::NoTransitionsButton*>()->Press();
+        auto button = songSelectButton->GetComponent<HMUI::NoTransitionsButton*>();
+        if (!button)
+            button = songSelectButton->GetComponentInChildren<HMUI::NoTransitionsButton*>();
+        if (!button) {
+            SnipeFeedLogger.error("Solo menu object found but has no NoTransitionsButton");
+            return false;
+        }
+        button->Press();
         return true;
     }
 }

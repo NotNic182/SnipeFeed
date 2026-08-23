@@ -230,14 +230,23 @@ void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     auto collectionNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelCollectionNavigationController*>();
     if (collectionNav && collectionNav->get_isActiveAndEnabled()) {
         auto filterNav = UnityEngine::Object::FindObjectOfType<GlobalNamespace::LevelFilteringNavigationController*>();
+
+        // The pack switch below is ASYNC: the new list content arrives a
+        // few frames later, so an immediate SelectLevel can miss. This is
+        // the game's own answer to that: the controller consumes
+        // _beatmapLevelToBeSelectedAfterPresent when the pack's list gets
+        // presented. The direct SelectLevel afterwards covers the case
+        // where Custom Levels is already the shown pack (no re-present).
+        collectionNav->_beatmapLevelToBeSelectedAfterPresent = level;
+        bool switchedPack = false;
         if (filterNav && filterNav->get_isActiveAndEnabled()) {
-            // Make sure the Custom Levels pack is the one being shown; the
-            // level select below is deferred by the controller until the
-            // pack finishes presenting (_beatmapLevelToBeSelectedAfterPresent).
-            if (auto pack = SongCore::API::Loading::GetCustomLevelPack())
+            if (auto pack = SongCore::API::Loading::GetCustomLevelPack()) {
                 filterNav->SelectAnnotatedBeatmapLevelCollection(static_cast<GlobalNamespace::BeatmapLevelPack*>(pack));
+                switchedPack = true;
+            }
         }
         collectionNav->SelectLevel(level);
+        SnipeFeedLogger.info("LaunchLevel in place: switchedPack={} level={}", switchedPack, static_cast<std::string>(level->songName));
         return;
     }
 

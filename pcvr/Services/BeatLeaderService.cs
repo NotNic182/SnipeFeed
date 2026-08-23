@@ -14,7 +14,6 @@ namespace SnipeFeed.PC.Services
     internal sealed class BeatLeaderService
     {
         private const string ApiBase = "https://api.beatleader.com";
-        private static readonly Uri ApiUri = new Uri(ApiBase);
         private static readonly HttpClient PublicClient = CreatePublicClient();
 
         private static HttpClient CreatePublicClient()
@@ -34,7 +33,7 @@ namespace SnipeFeed.PC.Services
             try
             {
                 progress?.Invoke("Loading your BeatLeader friends feed...");
-                var friendEntries = await TryFetchAuthenticatedFriendScores(feedCount);
+                var friendEntries = await TryFetchAuthenticatedFriendScores(feedCount, progress);
                 if (friendEntries != null && friendEntries.Count > 0)
                 {
                     result.Entries = friendEntries.OrderByDescending(x => x.Timepost).Take(feedCount).ToList();
@@ -45,7 +44,7 @@ namespace SnipeFeed.PC.Services
                 var input = SanitizeInput(playerInput);
                 if (string.IsNullOrEmpty(input))
                 {
-                    result.Error = "Couldn't reuse a BeatLeader PC login. Set PlayerId in UserData/SnipeFeedPC.json, then press Refresh.";
+                    result.Error = "Couldn't reuse a BeatLeader PC login.\nInstall the BeatLeader mod and let it sign in, then press Refresh.\n(Or set PlayerId in UserData/SnipeFeedPC.json to use the public API.)";
                     return result;
                 }
 
@@ -111,14 +110,61 @@ namespace SnipeFeed.PC.Services
             }
         }
 
-        private static async Task<List<FeedEntry>> TryFetchAuthenticatedFriendScores(int count)
-        {
-            using (var client = CreateBeatLeaderAuthenticatedClient())
-            {
-                if (client == null) return null;
+        // How long to wait for the BeatLeader mod's automatic sign-in.
+        // It starts when the menu scene loads (OnMenuInstaller ->
+        // Authentication.Login), so the first Snipe Feed refresh can easily
+        // run before the login cookie exists.
+        private const int LoginWaitMilliseconds = 8000;
 
-                var response = await client.GetAsync(ApiBase + "/user/friendScores?sortBy=date&order=desc&page=1&count=" + count);
-                if (!response.IsSuccessStatusCode) return null;
+        // The BeatLeader PC mod signs into whichever server is selected in
+        // its own settings; the login cookie only works against that host.
+        private static readonly string[] KnownApiBases =
+        {
+            "https://api.beatleader.com",
+            "https://api.beatleader.net",
+        };
+
+        private sealed class BeatLeaderSession
+        {
+            public string ApiBase;
+            public CookieCollection Cookies;
+        }
+
+        private static async Task<List<FeedEntry>> TryFetchAuthenticatedFriendScores(int count, Action<string> progress)
+        {
+            var beatLeader = FindBeatLeaderAssembly();
+            if (beatLeader == null) return null;
+
+            var session = TryGetBeatLeaderSession(beatLeader);
+            if (session == null)
+            {
+                progress?.Invoke("Waiting for the BeatLeader mod to sign in...");
+                await WaitForBeatLeaderLogin(beatLeader);
+                session = TryGetBeatLeaderSession(beatLeader);
+                if (session == null) return null;
+            }
+
+            // Copy the cookies read-only so we never mutate the BeatLeader
+            // mod's own session state.
+            var apiUri = new Uri(session.ApiBase);
+            var target = new CookieContainer();
+            foreach (Cookie cookie in session.Cookies)
+            {
+                var domain = string.IsNullOrEmpty(cookie.Domain) ? apiUri.Host : cookie.Domain;
+                target.Add(new Cookie(cookie.Name, cookie.Value, string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path, domain));
+            }
+
+            using (var handler = new HttpClientHandler { CookieContainer = target, UseCookies = true })
+            using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) })
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
+
+                var response = await client.GetAsync(session.ApiBase + "/user/friendScores?sortBy=date&order=desc&page=1&count=" + count);
+                if (!response.IsSuccessStatusCode)
+                {
+                    Plugin.Log?.Info("friendScores via the BeatLeader session returned HTTP " + (int)response.StatusCode + "; falling back to the public API.");
+                    return null;
+                }
 
                 var body = await response.Content.ReadAsStringAsync();
                 var page = JsonConvert.DeserializeObject<ScorePageDto>(body);
@@ -129,37 +175,101 @@ namespace SnipeFeed.PC.Services
             }
         }
 
-        private static HttpClient CreateBeatLeaderAuthenticatedClient()
+        private static Assembly FindBeatLeaderAssembly()
         {
+            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    if (assembly.GetName().Name == "BeatLeader") return assembly;
+                }
+                catch
+                {
+                    // A single misbehaving assembly must not abort the scan.
+                }
+            }
+            return null;
+        }
+
+        // Awaits BeatLeader's own Authentication.WaitLogin() task when the
+        // running version exposes it. That task never completes when the
+        // login fails, so it is always raced against a timeout. Falls back
+        // to polling for the login cookie on versions without WaitLogin.
+        private static async Task WaitForBeatLeaderLogin(Assembly beatLeader)
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
             try
             {
-                var factoryType = AppDomain.CurrentDomain.GetAssemblies()
-                    .Select(a => a.GetType("BeatLeader.WebRequests.WebRequestFactory", false))
-                    .FirstOrDefault(t => t != null);
+                var authType = beatLeader.GetType("BeatLeader.API.Authentication", false);
+                var waitLogin = authType?.GetMethod("WaitLogin", flags);
+                if (waitLogin != null && waitLogin.Invoke(null, null) is Task loginTask)
+                {
+                    await Task.WhenAny(loginTask, Task.Delay(LoginWaitMilliseconds));
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log?.Debug("BeatLeader WaitLogin unavailable: " + ex.Message);
+            }
+
+            for (var waited = 0; waited < LoginWaitMilliseconds; waited += 500)
+            {
+                if (TryGetBeatLeaderSession(beatLeader) != null) return;
+                await Task.Delay(500);
+            }
+        }
+
+        private static BeatLeaderSession TryGetBeatLeaderSession(Assembly beatLeader)
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            try
+            {
+                var factoryType = beatLeader.GetType("BeatLeader.WebRequests.WebRequestFactory", false);
                 if (factoryType == null) return null;
 
-                var field = factoryType.GetField("CookieContainer", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-                var source = field?.GetValue(null) as CookieContainer;
-                if (source == null) return null;
+                var containerObj = factoryType.GetField("CookieContainer", flags)?.GetValue(null)
+                    ?? factoryType.GetProperty("CookieContainer", flags)?.GetValue(null);
+                if (!(containerObj is CookieContainer container)) return null;
 
-                var target = new CookieContainer();
-                foreach (Cookie cookie in source.GetCookies(ApiUri))
+                foreach (var apiBase in CandidateApiBases(beatLeader))
                 {
-                    var domain = string.IsNullOrEmpty(cookie.Domain) ? ApiUri.Host : cookie.Domain;
-                    target.Add(new Cookie(cookie.Name, cookie.Value, string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path, domain));
+                    var cookies = container.GetCookies(new Uri(apiBase));
+                    if (cookies.Count > 0)
+                        return new BeatLeaderSession { ApiBase = apiBase, Cookies = cookies };
                 }
-
-                if (target.GetCookies(ApiUri).Count == 0) return null;
-
-                var handler = new HttpClientHandler { CookieContainer = target, UseCookies = true };
-                var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) };
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
-                return client;
             }
             catch (Exception ex)
             {
                 Plugin.Log?.Debug("BeatLeader cookie reuse unavailable: " + ex.Message);
-                return null;
+            }
+            return null;
+        }
+
+        // The server BeatLeader is actually signed into, first from its own
+        // BLConstants (a property in current versions, a const field in old
+        // ones), then the known mirrors.
+        private static IEnumerable<string> CandidateApiBases(Assembly beatLeader)
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            string configured = null;
+            try
+            {
+                var constants = beatLeader.GetType("BeatLeader.Utils.BLConstants", false);
+                configured = (constants?.GetProperty("BEATLEADER_API_URL", flags)?.GetValue(null)
+                    ?? constants?.GetField("BEATLEADER_API_URL", flags)?.GetValue(null)) as string;
+                configured = configured?.TrimEnd('/');
+            }
+            catch
+            {
+                // Fall through to the known mirrors.
+            }
+
+            if (!string.IsNullOrEmpty(configured)) yield return configured;
+            foreach (var known in KnownApiBases)
+            {
+                if (!string.Equals(known, configured, StringComparison.OrdinalIgnoreCase))
+                    yield return known;
             }
         }
 

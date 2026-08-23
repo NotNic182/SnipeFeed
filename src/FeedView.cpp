@@ -66,7 +66,11 @@ namespace {
     // its rows to 85 units there), so everything below is sized to fit
     // roughly 90x46.
     constexpr float CONTENT_WIDTH = 88.0f;
-    constexpr float LIST_HEIGHT = 34.0f;
+    // Vertical space reserved above the list for the control row + status
+    // line. The list itself stretches from here to the tab's real bottom
+    // edge (anchor-driven), so it fills whatever height the gameplay setup
+    // panel actually provides instead of guessing it.
+    constexpr float HEADER_HEIGHT = 15.0f;
 }
 
 void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActivation) {
@@ -110,6 +114,9 @@ void FeedView::RebuildList() {
     }
     listData->tableView->ReloadData();
     listData->tableView->ClearSelection();
+    // Re-evaluate the page arrows' enabled state against the new content.
+    if (auto scrollView = listData->tableView->_scrollView)
+        scrollView->RefreshButtons();
 
     if (statusText) {
         if (state.entries.empty()) {
@@ -202,7 +209,10 @@ void FeedView::OnCellClicked(int listIdx) {
 
 void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     if (!level) return;
-    if (detailModal) detailModal->Hide();
+    // Hide instantly (animated=false): the flow-coordinator dismissal below
+    // would freeze an animated hide mid-flight, leaving the modal stuck on
+    // screen when the gameplay setup panel comes back.
+    if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
     // Prime the solo flow coordinator with our level while it is still
     // active — after the dismissal below it can no longer be found.
@@ -426,18 +436,39 @@ void FeedView::BuildUI() {
     // whenever a cell reports selection regardless of which IDataSource
     // is installed, so swapping SetDataSource below does not disturb it
     // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
-    listData = BSML::Lite::CreateScrollableList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, LIST_HEIGHT}, [self](int idx) {
+    // Parent the list to the tab itself (NOT the top-pinned layout stack)
+    // so it can be anchor-stretched below: top edge fixed under the header,
+    // bottom edge glued to the tab's actual bottom, whatever the panel's
+    // real height is.
+    listData = BSML::Lite::CreateScrollableList(get_transform(), {0.0f, 0.0f}, {CONTENT_WIDTH, 34.0f}, [self](int idx) {
         self->OnCellClicked(idx);
     });
     listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
 
+    // Find the created hierarchy's root (direct child of the tab) and
+    // stretch it: full remaining height under the header, CONTENT_WIDTH wide.
+    auto listRoot = listData->get_transform();
+    while (listRoot->get_parent() && listRoot->get_parent() != get_transform())
+        listRoot = listRoot->get_parent();
+    if (auto listRect = listRoot->GetComponent<UnityEngine::RectTransform*>()) {
+        listRect->set_anchorMin({0.5f, 0.0f});
+        listRect->set_anchorMax({0.5f, 1.0f});
+        listRect->set_pivot({0.5f, 1.0f});
+        listRect->set_offsetMax({CONTENT_WIDTH / 2.0f, -HEADER_HEIGHT});
+        listRect->set_offsetMin({-CONTENT_WIDTH / 2.0f, 1.0f});
+    }
+
     // Center the page up/down arrows over the rows; stock placement
-    // leaves them offset to one side of the viewport.
+    // leaves them offset to one side of the viewport. SetAsLastSibling
+    // keeps them ABOVE the table viewport in raycast order — without it
+    // the rows' Touchable swallows the pointer and the arrows never
+    // receive the click (joystick scrolling works, arrows appear dead).
     if (auto scrollView = listData->tableView->_scrollView) {
         for (auto button : {scrollView->_pageUpButton, scrollView->_pageDownButton}) {
             if (!button) continue;
             auto rect = button->GetComponent<UnityEngine::RectTransform*>();
             rect->set_anchoredPosition({0.0f, rect->get_anchoredPosition().y});
+            button->get_transform()->SetAsLastSibling();
         }
     }
 
@@ -488,6 +519,10 @@ void FeedView::BuildUI() {
 
 void FeedView::DidActivate(bool firstActivation) {
     if (!listData) BuildUI();
+
+    // Defensive: if a hide was ever interrupted (menu hop, tab switch),
+    // clear the modal the moment the tab shows again.
+    if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
     bool stale = state.entries.empty()
         || (static_cast<long long>(std::time(nullptr)) - state.lastFetchTime) > REFRESH_MAX_AGE_SECONDS;

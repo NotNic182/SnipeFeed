@@ -1,0 +1,25 @@
+<bg xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'
+    xsi:noNamespaceSchemaLocation='https://monkeymanboy.github.io/BSML-Docs/BSMLSchema.xsd'>
+  <vertical spacing='0.7' child-control-width='true' child-expand-width='false'>
+    <horizontal spacing='1' child-control-width='true' child-expand-width='false'>
+      <dropdown-list-setting id='player-filter' text='' options='filter-options' value='selected-filter' apply-on-change='true' />
+      <increment-setting text='Scores' value='feed-count' min='10' max='100' increment='10' integer-only='true' apply-on-change='true' />
+      <button text='Refresh' on-click='refresh' />
+    </horizontal>
+
+    <string-setting text='BeatLeader ID fallback' value='player-id' apply-on-change='true' />
+    <text id='status' text='Loading...' font-size='2.5' align='Center' word-wrapping='true' />
+
+    <list id='feed-list'
+          data='feed-cells'
+          select-cell='select-score'
+          visible-cells='4.25'
+          cell-size='9.5'
+          list-width='90'
+          expand-cell='true'
+          show-scrollbar='true' />
+
+    <text id='detail-text' text='Select a score to see details.' font-size='2.5' align='Center' word-wrapping='true' />
+    <button id='play-button' text='Select a score' on-click='play-selected' interactable='false' />
+  </vertical>
+</bg>

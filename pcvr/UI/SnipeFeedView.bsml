@@ -59,16 +59,17 @@
         <vertical spacing='0' pref-width='50' flexible-width='1000'
                   child-control-width='true' child-control-height='true'
                   child-expand-width='false' child-expand-height='false'>
-          <!-- TMP's Ellipsis mode also ellipsizes VERTICALLY: when a line is
-               even slightly taller than its rect, the WHOLE line is culled
-               (the Quest mod shipped this exact bug once). These wrappers
-               pin safe heights (font 3.4 needs ~4.4, font 2.8 needs ~3.6)
-               so the height math can never squeeze a line out of existence. -->
-          <horizontal pref-height='4.6' min-height='4.6'
+          <!-- NO overflow-mode on the title: TMP's Ellipsis/Truncate modes
+               also cull VERTICALLY - a line even slightly taller than its
+               rect renders as nothing at all (the Quest mod shipped this
+               exact bug once, and this font's line height runs much taller
+               than the font size). Long titles are hard-clipped instead by
+               a RectMask2D that FeedRow adds to this wrapper. -->
+          <horizontal id='song-line' pref-height='4.6' min-height='4.6'
                       child-control-width='true' child-control-height='true'
                       child-expand-width='true' child-expand-height='true'>
             <text text='~song-text' font-size='3.4' align='MidlineLeft'
-                  overflow-mode='Ellipsis' word-wrapping='false'/>
+                  word-wrapping='false'/>
           </horizontal>
           <horizontal spacing='1.5' pref-height='3.9' min-height='3.9'
                       child-control-width='true' child-control-height='true'

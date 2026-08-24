@@ -569,6 +569,9 @@ namespace SnipeFeed.PC.UI
             [UIComponent("avatar-image")]
             private ImageView _avatar;
 
+            [UIObject("song-line")]
+            private GameObject _songLine;
+
             public FeedRow(FeedEntry entry, int rank)
             {
                 Entry = entry;
@@ -593,6 +596,11 @@ namespace SnipeFeed.PC.UI
             [UIAction("#post-parse")]
             private void PostParse()
             {
+                // Hard-clips overlong titles at the wrapper bounds; the
+                // title text itself has no TMP overflow mode (see the BSML).
+                if (_songLine != null && _songLine.GetComponent<RectMask2D>() == null)
+                    _songLine.AddComponent<RectMask2D>();
+
                 ResetImage(_cover);
                 ResetImage(_avatar);
                 LoadInto(_cover, Entry.CoverUrl);

@@ -1,6 +1,17 @@
 # SnipeFeed
 
-Your BeatLeader following feed inside Beat Saber on Quest. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
+Your BeatLeader following feed inside Beat Saber — on **Quest standalone and PCVR**. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
+
+## Two versions, one repo
+
+| Platform | Source | Download |
+|---|---|---|
+| **Quest standalone** | this directory (C++ / Scotland2 qmod) | [Releases](https://github.com/NotNic182/SnipeFeed/releases) — `SnipeFeed.qmod` |
+| **PCVR** | [`pcvr/`](pcvr/) (C# / BSIPA plugin) | [Releases](https://github.com/NotNic182/SnipeFeed/releases) — `SnipeFeed.PC-*.zip` |
+
+Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in every gameplay setup panel, BeatLeader-style score rows, the detail modal with **Play / Download & Play**, and automatic reuse of your BeatLeader mod login. PC requirements, build and install instructions live in [pcvr/README.md](pcvr/README.md).
+
+**The rest of this README covers the Quest version.**
 
 - Target: **Beat Saber 1.40.8 (build 7379), Quest standalone (aarch64), Scotland2**
 - Dependencies (auto-installed from `mod.json`): beatsaber-hook, custom-types, paper2, BSML

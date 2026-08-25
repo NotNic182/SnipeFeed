@@ -20,7 +20,7 @@ namespace SnipeFeed.PC.Services
         private static HttpClient CreatePublicClient()
         {
             var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.1");
             return client;
         }
 

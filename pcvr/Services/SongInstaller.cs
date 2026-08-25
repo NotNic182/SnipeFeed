@@ -27,7 +27,7 @@ namespace SnipeFeed.PC.Services
 
         static SongInstaller()
         {
-            Client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
+            Client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.1");
         }
 
         public static BeatmapLevel GetInstalledLevel(string hash)

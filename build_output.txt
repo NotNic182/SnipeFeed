@@ -1,0 +1,36 @@
+UsingNDKC:\Users\notni\AppData\Roaming\QPM-RS\ndk\27.3.13750724+preview-0
+CMake Warning (deprecated) at C:/Users/notni/AppData/Roaming/QPM-RS/ndk/27.3.13750724+preview-0/build/cmake/android.toolchain.cmake:35 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+Call Stack (most recent call first):
+  build/CMakeFiles/4.4.2/CMakeSystem.cmake:6 (include)
+  CMakeLists.txt:10 (project)
+This warning is for project developers.  Use -Wno-author or -Wno-deprecated
+to suppress it.
+
+CMake Warning (deprecated) at C:/Users/notni/AppData/Roaming/QPM-RS/ndk/27.3.13750724+preview-0/build/cmake/flags.cmake:18 (cmake_minimum_required):
+  Compatibility with CMake < 3.10 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value.  Or, use the <min>...<max> syntax
+  to tell CMake that the project requires at least <min> but has been updated
+  to work with policies introduced by <max> or earlier.
+Call Stack (most recent call first):
+  C:/Program Files/CMake/share/cmake-4.4/Modules/Platform/Android-Clang.cmake:23 (include)
+  C:/Program Files/CMake/share/cmake-4.4/Modules/Platform/Android-Clang-C.cmake:1 (include)
+  C:/Program Files/CMake/share/cmake-4.4/Modules/CMakeCInformation.cmake:48 (include)
+  CMakeLists.txt:10 (project)
+This warning is for project developers.  Use -Wno-author or -Wno-deprecated
+to suppress it.
+
+-- Configuring done (0.1s)
+-- Generating done (0.0s)
+-- Build files have been written to: C:/Users/notni/Music/SnipeFeed-main/SnipeFeed-main/build
+[1/4] Building CXX object CMakeFiles/snipefeed.dir/src/Feed.cpp.o
+[2/4] Building CXX object CMakeFiles/snipefeed.dir/src/FeedCell.cpp.o
+[3/4] Building CXX object CMakeFiles/snipefeed.dir/src/FeedView.cpp.o
+[4/4] Linking CXX shared library libsnipefeed.so; Strip debug symbols done on final binary.; Make directory for debug symbols; Rename the lib to debug_ since it has debug symbols; Rename the stripped lib to regular

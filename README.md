@@ -11,11 +11,20 @@ Your BeatLeader following feed inside Beat Saber — on **Quest standalone and P
 
 Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in every gameplay setup panel, BeatLeader-style score rows, the detail modal with **Play / Download & Play**, and automatic reuse of your BeatLeader mod login. PC requirements, build and install instructions live in [pcvr/README.md](pcvr/README.md).
 
+## v2.0.1 fixes
+
+- **Quest TLS verification**: peer verification now enabled with a bundled CA bundle (libcurl `CURLOPT_CAINFO`).
+- **Async lifetime safety**: all callback captures now use `SafePtrUnity` to prevent use-after-free on async completion.
+- **Atomic map installs**: extraction now happens to a temp directory and renames into place, ensuring failed installs leave no corrupt level folders.
+- **Truthful error messages**: feed empty vs. network error now clearly distinguished; cookie reuse and fallback paths clearly documented in code.
+- **Bounded image caches**: both Quest and PC limit cached sprites/textures to prevent session-long memory growth.
+- **No PC freeze on install**: all file I/O now runs off the main thread; map installs no longer cause VR frame drops.
+
 **The rest of this README covers the Quest version.**
 
 - Target: **Beat Saber 1.40.8 (build 7379), Quest standalone (aarch64), Scotland2**
-- Dependencies (auto-installed from `mod.json`): beatsaber-hook, custom-types, paper2, BSML
-- Uses only public BeatLeader API endpoints — no login, no credentials stored
+- Dependencies (auto-installed from `mod.json`): beatsaber-hook, custom-types, paper2, BSML, SongCore
+- Reuses the BeatLeader mod's login read-only when present (never modified or stored by SnipeFeed); otherwise only public API endpoints
 
 ## Where to find it
 
@@ -31,6 +40,8 @@ Tap any score row to open its details. The button at the bottom adapts to where 
 | Multiplayer song-select screen | **Play** / **Download & Play** | Selects the song directly in the open picker. |
 | A lobby (vanilla multiplayer or Multiplayer+) | **Download** / **In Custom Levels** | Downloads and installs the map only — the mod never yanks you out of a lobby. Then pick the song through the lobby's own song picker so the whole room gets it. |
 | Score on an official OST/DLC song | *(disabled)* | Official songs have no downloadable map. |
+
+In Party mode, the picker is selected in place on PC (the panel's picker is already showing); on Quest, Party follows the Solo re-entry path (picker-or-download).
 
 ## Setup (one time)
 
@@ -82,7 +93,7 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 
 - **Row-based feed layout**: every score is one clean horizontal row — rank, uniform cover art, avatar + prominent player name with the time-ago right beside it, and a single info line (song name · difficulty · stars · accuracy · FC) with clear spacing between stats. A right-edge chevron marks each row as selectable. Fixes the v0.4.0 bug where the player name never rendered (the name line was vertically ellipsized away by its own row height).
 - **Consistent stat colors**: difficulty keeps BeatLeader's per-difficulty colors (spelled out as "Expert+"), stars yellow, accuracy orange, FC green, secondary text muted gray.
-- **Adjustable feed size**: a "Scores" stepper (10–100, default 50) controls how many scores a refresh pulls on both the friends-feed and public-API paths.
+- **Adjustable feed size**: a "Scores" stepper (10–100, default 50) controls how many scores a refresh pulls on both the friends-feed and public-API paths (on the public-API path the per-player pull scales up to meet the stepper, capped at 20 per player).
 - **Simplified header**: the ID search bar is gone — the feed uses the BeatLeader mod login on the headset (`PlayerId` in the config file remains as a fallback for the public API). One control row holds the player filter dropdown, the Scores stepper, and Refresh; the redundant heading label is gone too.
 - **Wider, denser list**: the list and header rows share one 105-unit content width, filling the previously empty horizontal space; row backgrounds are darker so entries separate visually; status line is small muted secondary text; scroll arrows centered over the rows.
 

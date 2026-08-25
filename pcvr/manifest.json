@@ -3,7 +3,7 @@
   "id": "SnipeFeedPC",
   "name": "SnipeFeed PCVR",
   "author": "NotNic",
-  "version": "2.0.0-pc.6",
+  "version": "2.0.1-pc.1",
   "description": "Your BeatLeader following feed inside Beat Saber on PCVR, with BeatSaver download support.",
   "gameVersion": "1.40.8",
   "dependsOn": {

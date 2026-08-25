@@ -25,6 +25,10 @@ namespace SnipeFeed.PC.Models
     {
         public bool Success { get; set; }
         public string Error { get; set; } = "";
+        // Set only on Success with zero entries: a user-facing message such
+        // as "no recent scores from the players you follow" that is NOT an
+        // error and must not trigger fallback paths.
+        public string Info { get; set; } = "";
         public List<FeedEntry> Entries { get; set; } = new List<FeedEntry>();
     }
 }

@@ -35,10 +35,12 @@ namespace SnipeFeed.PC.Services
             {
                 progress?.Invoke("Loading your BeatLeader friends feed...");
                 var (friendEntries, rateLimited) = await TryFetchAuthenticatedFriendScores(feedCount, progress);
-                if (friendEntries != null && friendEntries.Count > 0)
+                if (friendEntries != null)
                 {
                     result.Entries = friendEntries.OrderByDescending(x => x.Timepost).Take(feedCount).ToList();
                     result.Success = true;
+                    if (result.Entries.Count == 0)
+                        result.Info = "No recent scores from the players you follow yet.\nFollow players on beatleader.com, then press Refresh.";
                     return result;
                 }
 
@@ -72,6 +74,12 @@ namespace SnipeFeed.PC.Services
                     result.Error = "Your following list is empty or hidden. Log into the BeatLeader mod, or disable 'Hide my friends' on beatleader.com.";
                     return result;
                 }
+
+                // The Scores stepper promises up to feedCount results; with a
+                // short following list the configured per-player count could
+                // never reach it. Pull enough per player, within API limits.
+                var neededPerPlayer = (int)Math.Ceiling((double)feedCount / following.Count);
+                scoresPerPlayer = Math.Max(scoresPerPlayer, Math.Min(neededPerPlayer, 20));
 
                 var gate = new SemaphoreSlim(4);
                 var completed = 0;
@@ -125,6 +133,11 @@ namespace SnipeFeed.PC.Services
         // run before the login cookie exists.
         private const int LoginWaitMilliseconds = 8000;
 
+        // Remembers that a full login wait already timed out once this
+        // session, so a BeatLeader install with no signed-in account doesn't
+        // stall every refresh 8 seconds for the rest of the session.
+        private static bool _loginWaitExhausted;
+
         // The BeatLeader PC mod signs into whichever server is selected in
         // its own settings; the login cookie only works against that host.
         private static readonly string[] KnownApiBases =
@@ -150,8 +163,17 @@ namespace SnipeFeed.PC.Services
 
             if (!IsBeatLeaderSignedIn(beatLeader) && TryGetBeatLeaderSession(beatLeader) == null)
             {
-                progress?.Invoke("Waiting for the BeatLeader mod to sign in...");
-                await WaitForBeatLeaderLogin(beatLeader);
+                if (_loginWaitExhausted)
+                {
+                    Plugin.Log?.Debug("Skipping the BeatLeader login wait (it already timed out this session).");
+                }
+                else
+                {
+                    progress?.Invoke("Waiting for the BeatLeader mod to sign in...");
+                    await WaitForBeatLeaderLogin(beatLeader);
+                    if (!IsBeatLeaderSignedIn(beatLeader) && TryGetBeatLeaderSession(beatLeader) == null)
+                        _loginWaitExhausted = true;
+                }
             }
 
             var rateLimited = false;
@@ -197,29 +219,40 @@ namespace SnipeFeed.PC.Services
 
         private static async Task<(List<FeedEntry> Entries, long Status)> FetchFriendScoresWithCookies(BeatLeaderSession session, int count)
         {
-            // Copy the cookies read-only so we never mutate the BeatLeader
-            // mod's own session state.
-            var apiUri = new Uri(session.ApiBase);
-            var target = new CookieContainer();
-            foreach (Cookie cookie in session.Cookies)
+            try
             {
-                var domain = string.IsNullOrEmpty(cookie.Domain) ? apiUri.Host : cookie.Domain;
-                target.Add(new Cookie(cookie.Name, cookie.Value, string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path, domain));
-            }
-
-            using (var handler = new HttpClientHandler { CookieContainer = target, UseCookies = true })
-            using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) })
-            {
-                client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
-
-                var response = await client.GetAsync(FriendScoresUrl(session.ApiBase, count));
-                if (!response.IsSuccessStatusCode)
+                // Copy the cookies read-only so we never mutate the BeatLeader
+                // mod's own session state.
+                var apiUri = new Uri(session.ApiBase);
+                var target = new CookieContainer();
+                foreach (Cookie cookie in session.Cookies)
                 {
-                    Plugin.Log?.Info("friendScores via the BeatLeader session cookies returned HTTP " + (int)response.StatusCode + ".");
-                    return (null, (long)response.StatusCode);
+                    var domain = string.IsNullOrEmpty(cookie.Domain) ? apiUri.Host : cookie.Domain;
+                    target.Add(new Cookie(cookie.Name, cookie.Value, string.IsNullOrEmpty(cookie.Path) ? "/" : cookie.Path, domain));
                 }
 
-                return (ParseFriendScores(await response.Content.ReadAsStringAsync()), 200);
+                using (var handler = new HttpClientHandler { CookieContainer = target, UseCookies = true })
+                using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) })
+                {
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
+
+                    var response = await client.GetAsync(FriendScoresUrl(session.ApiBase, count));
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        Plugin.Log?.Info("friendScores via the BeatLeader session cookies returned HTTP " + (int)response.StatusCode + ".");
+                        return (null, (long)response.StatusCode);
+                    }
+
+                    return (ParseFriendScores(await response.Content.ReadAsStringAsync()), 200);
+                }
+            }
+            catch (Exception ex)
+            {
+                // new Uri / Cookie.Add / GetAsync can all throw; a failure
+                // here must fall through to the Unity path and the public
+                // fallback, not abort the whole fetch.
+                Plugin.Log?.Info("friendScores via the BeatLeader session cookies failed: " + ex.Message);
+                return (null, 0);
             }
         }
 
@@ -261,14 +294,16 @@ namespace SnipeFeed.PC.Services
                 if (page?.data == null) return null;
 
                 var unknown = new PlayerDto { name = "?" };
-                var entries = page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
-                return entries.Count > 0 ? entries : null;
+                // An empty list is a real, successful answer (the user follows
+                // nobody, or nobody scored recently) — never fold it into null,
+                // which callers read as "no usable login".
+                return page.data.Where(x => x != null).Select(x => ParseScore(x, unknown)).ToList();
             }
             catch (Exception ex)
             {
                 // A parse failure after a successful request must be loud —
                 // it means the feed WAS fetched and then thrown away.
-                Plugin.Log?.Info("Couldn't parse the friends feed response: " + ex.Message);
+                Plugin.Log?.Warn("Couldn't parse the friends feed response: " + ex.Message);
                 return null;
             }
         }
@@ -317,6 +352,10 @@ namespace SnipeFeed.PC.Services
                 var waitLogin = authType?.GetMethod("WaitLogin", flags);
                 if (waitLogin != null && waitLogin.Invoke(null, null) is Task loginTask)
                 {
+                    // Observe the login task's eventual fault so a failed
+                    // login can't surface later as UnobservedTaskException.
+                    _ = loginTask.ContinueWith(t => _ = t.Exception,
+                        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
                     await Task.WhenAny(loginTask, Task.Delay(LoginWaitMilliseconds));
                     return;
                 }

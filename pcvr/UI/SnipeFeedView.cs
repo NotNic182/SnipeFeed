@@ -177,7 +177,7 @@ namespace SnipeFeed.PC.UI
             // switch), clear the modal the moment the tab shows again.
             HideModal(false);
 
-            var stale = _entries.Count == 0 || DateTimeOffset.UtcNow - _lastFetch > CacheLifetime;
+            var stale = DateTimeOffset.UtcNow - _lastFetch > CacheLifetime;
             if (stale)
             {
                 Refresh();

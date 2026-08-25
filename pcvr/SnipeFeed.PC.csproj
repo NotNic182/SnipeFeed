@@ -10,6 +10,7 @@
     <AppOutputBase>$(MSBuildProjectDirectory)\</AppOutputBase>
     <LocalRefsDir Condition="Exists('..\..\Refs')">..\..\Refs</LocalRefsDir>
     <BeatSaberDir Condition="'$(BeatSaberDir)' == ''">$(LocalRefsDir)</BeatSaberDir>
+    <DefaultItemExcludes>$(DefaultItemExcludes);Tests/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

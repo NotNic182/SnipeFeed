@@ -34,7 +34,7 @@
     <horizontal pref-width='88' min-height='3.5'
                 child-control-width='true' child-control-height='true'
                 child-expand-width='true'>
-      <text id='status' text='Loading...' font-size='2.4' color='#9EAEC2'
+      <text id='status' text='' font-size='2.4' color='#9EAEC2'
             align='Center' word-wrapping='true'/>
     </horizontal>
 

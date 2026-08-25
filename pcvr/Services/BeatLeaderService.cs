@@ -122,7 +122,9 @@ namespace SnipeFeed.PC.Services
             catch (Exception ex)
             {
                 Plugin.Log?.Error("Feed refresh failed: " + ex);
-                result.Error = "Couldn't load the feed: " + ex.Message;
+                // Qualified: a bare "Formatting" is ambiguous here against
+                // Newtonsoft.Json.Formatting, which this file also uses.
+                result.Error = "Couldn't load the feed: " + Utils.Formatting.EscapeForTmp(ex.Message);
                 return result;
             }
         }
@@ -234,7 +236,7 @@ namespace SnipeFeed.PC.Services
                 using (var handler = new HttpClientHandler { CookieContainer = target, UseCookies = true })
                 using (var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(15) })
                 {
-                    client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.0");
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("SnipeFeed-PC/2.0.1");
 
                     var response = await client.GetAsync(FriendScoresUrl(session.ApiBase, count));
                     if (!response.IsSuccessStatusCode)
@@ -263,7 +265,7 @@ namespace SnipeFeed.PC.Services
                 using (var request = UnityWebRequest.Get(FriendScoresUrl(apiBase, count)))
                 {
                     request.timeout = 15;
-                    request.SetRequestHeader("User-Agent", "SnipeFeed-PC/2.0.0");
+                    request.SetRequestHeader("User-Agent", "SnipeFeed-PC/2.0.1");
                     var operation = request.SendWebRequest();
                     while (!operation.isDone) await Task.Yield();
 
@@ -495,6 +497,12 @@ namespace SnipeFeed.PC.Services
         private static string SanitizeInput(string input)
         {
             input = (input ?? "").Trim().TrimEnd('/');
+
+            // A pasted profile URL can carry ?tab=... or #fragment — never
+            // part of the id/alias.
+            var cut = input.IndexOfAny(new[] { '?', '#' });
+            if (cut >= 0) input = input.Substring(0, cut);
+
             var slash = input.LastIndexOf('/');
             if (slash >= 0) input = input.Substring(slash + 1);
             return input.Trim();

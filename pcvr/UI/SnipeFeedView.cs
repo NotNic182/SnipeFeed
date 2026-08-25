@@ -336,7 +336,7 @@ namespace SnipeFeed.PC.UI
             _selected = row.Entry;
 
             if (_modalDetail != null) _modalDetail.text = Formatting.DetailText(_selected);
-            if (_modalPlayer != null) _modalPlayer.text = _selected.PlayerName;
+            if (_modalPlayer != null) _modalPlayer.text = Formatting.EscapeForTmp(_selected.PlayerName);
 
             // Images, with the same stale-guard the rows use.
             _pendingCoverUrl = _selected.CoverUrl;
@@ -456,10 +456,13 @@ namespace SnipeFeed.PC.UI
         }
 
         // Puts an install outcome where the user is actually looking: the
-        // modal if this score is still the open one, else the status line.
+        // modal if this score is still the open one AND the modal is
+        // actually visible, else the status line. Writing into a hidden
+        // modal's text would leave the message invisible until the modal
+        // happens to reopen on some later, unrelated score.
         private void ShowInstallOutcome(FeedEntry entry, string message)
         {
-            if (ReferenceEquals(_selected, entry))
+            if (ReferenceEquals(_selected, entry) && _detailModal != null && _detailModal.isActiveAndEnabled)
                 SetDetail(message);
             else
                 SetStatus(message);

@@ -366,10 +366,14 @@ void FeedView::PlaySelected() {
                 if (view->playButton) view->playButton->set_interactable(true);
                 if (level) {
                     if (view->playButtonText) view->playButtonText->set_text("Play");
-                    // Only auto-launch if the user is still on this tab —
-                    // firing the solo re-entry while they browse another
-                    // tab or screen would yank them away without warning.
-                    if (view->get_isActiveAndEnabled()) {
+                    // Only auto-launch if the user is still on this tab AND
+                    // this score is still the selected one — downloading
+                    // score A while score B's modal is open (or from another
+                    // screen) would yank them somewhere they didn't ask to go.
+                    bool stillSelected = state.selected >= 0
+                        && state.selected < static_cast<int>(state.entries.size())
+                        && state.entries[state.selected].songHash == entry.songHash;
+                    if (stillSelected && view->get_isActiveAndEnabled()) {
                         view->LaunchLevel(level);
                     } else if (view->statusText) {
                         view->statusText->set_text("Downloaded — press Play when you're back.");

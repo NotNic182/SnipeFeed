@@ -13,8 +13,8 @@ Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in ev
 
 ## v2.0.1 fixes
 
-- **Quest TLS verification**: peer verification now enabled with a bundled CA bundle (libcurl `CURLOPT_CAINFO`).
-- **Async lifetime safety**: all callback captures now use `SafePtrUnity` to prevent use-after-free on async completion.
+- **Quest TLS verification**: peer verification now enabled, checked against Android's system CA store (libcurl `CURLOPT_CAPATH`) — no CA bundle ships in the qmod; a bundled-`cacert.pem` + `CURLOPT_CAINFO` fallback is documented for devices whose libcurl build can't read CAPATH, but isn't shipped today.
+- **Async lifetime safety**: callbacks that cross from a worker thread capture no il2cpp/Unity pointers at all, only plain data — only callbacks that are guaranteed to run and die on the main thread capture Unity objects, via `SafePtrUnity`, to prevent use-after-free.
 - **Atomic map installs**: extraction now happens to a temp directory and renames into place, ensuring failed installs leave no corrupt level folders.
 - **Truthful error messages**: feed empty vs. network error now clearly distinguished; cookie reuse and fallback paths clearly documented in code.
 - **Bounded image caches**: both Quest and PC limit cached sprites/textures to prevent session-long memory growth.
@@ -36,12 +36,12 @@ Tap any score row to open its details. The button at the bottom adapts to where 
 
 | Where you are | Button | What happens |
 |---|---|---|
-| Solo/Party song selection | **Play** / **Download & Play** | Downloads the map if needed, then the menu briefly hops out and back in with the sniped song selected, ready to play. |
-| Multiplayer song-select screen | **Play** / **Download & Play** | Selects the song directly in the open picker. |
+| Solo song selection | **Play** / **Download & Play** | Downloads the map if needed, then the menu briefly hops out and back in with the sniped song selected, ready to play. |
+| Party song selection, Multiplayer song-select screen | **Play** / **Download & Play** | Downloads the map if needed, then selects the song directly in the open picker — no hop (the re-enter hop is Solo-only). |
 | A lobby (vanilla multiplayer or Multiplayer+) | **Download** / **In Custom Levels** | Downloads and installs the map only — the mod never yanks you out of a lobby. Then pick the song through the lobby's own song picker so the whole room gets it. |
 | Score on an official OST/DLC song | *(disabled)* | Official songs have no downloadable map. |
 
-In Party mode, the picker is selected in place on PC (the panel's picker is already showing); on Quest, Party follows the Solo re-entry path (picker-or-download).
+In Party mode the song is selected in place in the open picker on both platforms (the re-enter hop is Solo-only).
 
 ## Setup (one time)
 

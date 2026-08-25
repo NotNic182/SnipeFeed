@@ -79,7 +79,16 @@ namespace SnipeFeed::Installer {
             char const* rawName = zip_entry_name(archive);
             std::string name = rawName ? rawName : "";
             bool isDir = zip_entry_isdir(archive) == 1;
-            extractedBytes += zip_entry_size(archive);
+
+            unsigned long long entrySize = zip_entry_size(archive);
+            // A forged zip64 size could wrap the running total past the cap.
+            if (entrySize > MAX_TOTAL_BYTES) {
+                zip_entry_close(archive);
+                zip_close(archive);
+                outError = "The map archive is unreasonably large.";
+                return false;
+            }
+            extractedBytes += entrySize;
 
             // Stricter than strictly necessary ("song..egg" is also refused)
             // — real beatmap zips contain plain relative names only.

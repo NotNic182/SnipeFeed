@@ -24,15 +24,14 @@ namespace SnipeFeed {
         bool fullCombo = false;
     };
 
+    // On success with ZERO entries, `error` carries a user-facing info
+    // message ("you don't follow anyone yet") — it is not a failure and
+    // callers must not treat it as one.
     struct FeedResult {
         bool success = false;
         std::string error;
         std::vector<FeedEntry> entries;
     };
-
-    // On success with ZERO entries, `error` carries a user-facing info
-    // message ("you don't follow anyone yet") — it is not a failure and
-    // callers must not treat it as one.
 
     // Fetches the feed on a detached worker thread. Tries the BeatLeader mod
     // login cookie first (real friends feed); falls back to the public API

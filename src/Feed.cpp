@@ -280,102 +280,102 @@ namespace SnipeFeed {
                 FeedResult result;
 
                 // Path 1: reuse the BeatLeader mod login for the real friends feed.
-            std::string cookieFile = BeatLeaderCookieFile();
-            std::error_code fsError;
-            if (std::filesystem::exists(cookieFile, fsError)) {
-                if (onProgress) onProgress("Loading your BeatLeader friends feed...");
-                switch (TryFetchFriendScores(cookieFile, feedCount, result.entries)) {
-                    case FriendFeedOutcome::Loaded:
-                        std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
-                            return a.timepost > b.timepost;
-                        });
-                        result.success = true;
-                        onDone(std::move(result));
-                        return;
-                    case FriendFeedOutcome::Empty:
-                        result.success = true;
-                        result.error = "No recent scores from the players you follow yet.\nFollow players on beatleader.com, then press Refresh.";
-                        onDone(std::move(result));
-                        return;
-                    case FriendFeedOutcome::NetworkError:
-                        // The public path rides the same network — falling
-                        // through would waste 15s and blame the login.
-                        result.error = "Network error. Check your connection.";
-                        onDone(std::move(result));
-                        return;
-                    case FriendFeedOutcome::Unavailable:
-                        result.entries.clear();
-                        break;
+                std::string cookieFile = BeatLeaderCookieFile();
+                std::error_code fsError;
+                if (std::filesystem::exists(cookieFile, fsError)) {
+                    if (onProgress) onProgress("Loading your BeatLeader friends feed...");
+                    switch (TryFetchFriendScores(cookieFile, feedCount, result.entries)) {
+                        case FriendFeedOutcome::Loaded:
+                            std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
+                                return a.timepost > b.timepost;
+                            });
+                            result.success = true;
+                            onDone(std::move(result));
+                            return;
+                        case FriendFeedOutcome::Empty:
+                            result.success = true;
+                            result.error = "No recent scores from the players you follow yet.\nFollow players on beatleader.com, then press Refresh.";
+                            onDone(std::move(result));
+                            return;
+                        case FriendFeedOutcome::NetworkError:
+                            // The public path rides the same network — falling
+                            // through would waste 15s and blame the login.
+                            result.error = "Network error. Check your connection.";
+                            onDone(std::move(result));
+                            return;
+                        case FriendFeedOutcome::Unavailable:
+                            result.entries.clear();
+                            break;
+                    }
                 }
-            }
 
-            // Path 2: public API using the configured ID or alias.
-            std::string input = SanitizeInput(playerInput);
-            if (input.empty()) {
-                result.error = "Couldn't use a BeatLeader mod login on this headset.\nLog into the BeatLeader mod, then press Refresh.\n(Or set PlayerId in SnipeFeed's config file to use the public API.)";
-                onDone(std::move(result));
-                return;
-            }
-
-            FollowedPlayer self{input, input, ""};
-            if (!IsNumeric(input)) {
-                if (onProgress) onProgress("Resolving '" + input + "'...");
-                if (!ResolvePlayer(input, self, result.error)) {
+                // Path 2: public API using the configured ID or alias.
+                std::string input = SanitizeInput(playerInput);
+                if (input.empty()) {
+                    result.error = "Couldn't use a BeatLeader mod login on this headset.\nLog into the BeatLeader mod, then press Refresh.\n(Or set PlayerId in SnipeFeed's config file to use the public API.)";
                     onDone(std::move(result));
                     return;
                 }
-            }
 
-            if (onProgress) onProgress("Loading players you follow...");
-            std::vector<FollowedPlayer> following;
-            if (!FetchFollowing(self.id, maxPlayers, following, result.error)) {
-                onDone(std::move(result));
-                return;
-            }
-
-            if (onProgress) onProgress("Loading scores... 0/" + std::to_string(following.size()));
-
-            std::atomic<size_t> nextIdx{0};
-            std::atomic<size_t> doneCount{0};
-            std::mutex mergeMutex;
-            size_t workerCount = std::min<size_t>(4, following.size());
-            std::vector<std::thread> workers;
-            workers.reserve(workerCount);
-            for (size_t w = 0; w < workerCount; w++) {
-                workers.emplace_back([&] {
-                    while (true) {
-                        size_t i = nextIdx.fetch_add(1);
-                        if (i >= following.size()) break;
-                        std::vector<FeedEntry> local;
-                        try {
-                            FetchRecentScores(following[i], scoresPerPlayer, local);
-                        } catch (std::exception const& e) {
-                            SnipeFeedLogger.warn("Score fetch for {} crashed: {}", following[i].id, e.what());
-                        }
-                        size_t done = doneCount.fetch_add(1) + 1;
-                        if (onProgress)
-                            onProgress("Loading scores... " + std::to_string(done) + "/" + std::to_string(following.size()));
-                        std::lock_guard<std::mutex> lock(mergeMutex);
-                        result.entries.insert(result.entries.end(),
-                                              std::make_move_iterator(local.begin()),
-                                              std::make_move_iterator(local.end()));
+                FollowedPlayer self{input, input, ""};
+                if (!IsNumeric(input)) {
+                    if (onProgress) onProgress("Resolving '" + input + "'...");
+                    if (!ResolvePlayer(input, self, result.error)) {
+                        onDone(std::move(result));
+                        return;
                     }
+                }
+
+                if (onProgress) onProgress("Loading players you follow...");
+                std::vector<FollowedPlayer> following;
+                if (!FetchFollowing(self.id, maxPlayers, following, result.error)) {
+                    onDone(std::move(result));
+                    return;
+                }
+
+                if (onProgress) onProgress("Loading scores... 0/" + std::to_string(following.size()));
+
+                std::atomic<size_t> nextIdx{0};
+                std::atomic<size_t> doneCount{0};
+                std::mutex mergeMutex;
+                size_t workerCount = std::min<size_t>(4, following.size());
+                std::vector<std::thread> workers;
+                workers.reserve(workerCount);
+                for (size_t w = 0; w < workerCount; w++) {
+                    workers.emplace_back([&] {
+                        while (true) {
+                            size_t i = nextIdx.fetch_add(1);
+                            if (i >= following.size()) break;
+                            std::vector<FeedEntry> local;
+                            try {
+                                FetchRecentScores(following[i], scoresPerPlayer, local);
+                            } catch (std::exception const& e) {
+                                SnipeFeedLogger.warn("Score fetch for {} crashed: {}", following[i].id, e.what());
+                            }
+                            size_t done = doneCount.fetch_add(1) + 1;
+                            if (onProgress)
+                                onProgress("Loading scores... " + std::to_string(done) + "/" + std::to_string(following.size()));
+                            std::lock_guard<std::mutex> lock(mergeMutex);
+                            result.entries.insert(result.entries.end(),
+                                                  std::make_move_iterator(local.begin()),
+                                                  std::make_move_iterator(local.end()));
+                        }
+                    });
+                }
+                for (auto& t : workers) t.join();
+
+                std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
+                    return a.timepost > b.timepost;
                 });
-            }
-            for (auto& t : workers) t.join();
+                if (result.entries.size() > static_cast<size_t>(feedCount))
+                    result.entries.resize(feedCount);
 
-            std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
-                return a.timepost > b.timepost;
-            });
-            if (result.entries.size() > static_cast<size_t>(feedCount))
-                result.entries.resize(feedCount);
-
-            if (result.entries.empty()) {
-                result.error = "No recent scores found for the players you follow.";
-            } else {
-                result.success = true;
-            }
-            onDone(std::move(result));
+                if (result.entries.empty()) {
+                    result.error = "No recent scores found for the players you follow.";
+                } else {
+                    result.success = true;
+                }
+                onDone(std::move(result));
             } catch (std::exception const& e) {
                 // An exception escaping a detached thread is std::terminate —
                 // a whole-game crash. Turn it into a feed error instead.

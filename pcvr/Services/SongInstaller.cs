@@ -7,6 +7,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
 
@@ -21,6 +22,7 @@ namespace SnipeFeed.PC.Services
 
     internal static class SongInstaller
     {
+        private const long MaxExtractedBytes = 512L * 1024 * 1024;
         private static readonly HttpClient Client = new HttpClient { Timeout = TimeSpan.FromSeconds(120) };
 
         static SongInstaller()
@@ -31,17 +33,35 @@ namespace SnipeFeed.PC.Services
         public static BeatmapLevel GetInstalledLevel(string hash)
         {
             if (string.IsNullOrWhiteSpace(hash)) return null;
-            return Loader.GetLevelByHash(hash) ?? Loader.GetLevelByHash(hash.ToLowerInvariant());
+            // Custom level IDs embed the hash uppercase; SongCore versions
+            // differ on normalizing their argument, so try the uppercase
+            // spelling first and the caller's spelling second.
+            return Loader.GetLevelByHash(hash.ToUpperInvariant()) ?? Loader.GetLevelByHash(hash);
+        }
+
+        // The hash arrives from feed JSON; it becomes a URL segment and an
+        // install folder name, so anything but exactly 40 hex chars is refused.
+        private static bool IsValidHash(string hash)
+        {
+            if (string.IsNullOrEmpty(hash) || hash.Length != 40) return false;
+            foreach (var c in hash)
+            {
+                var hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                if (!hex) return false;
+            }
+            return true;
         }
 
         public static async Task<SongInstallResult> DownloadAndInstallAsync(string hash)
         {
             hash = (hash ?? "").Trim().ToLowerInvariant();
             if (hash.Length == 0) return Fail("This score is not a downloadable custom song.");
+            if (!IsValidHash(hash)) return Fail("This score has an invalid map hash.");
 
             var existing = GetInstalledLevel(hash);
             if (existing != null) return new SongInstallResult { Success = true, Level = existing };
 
+            string temp = null;
             try
             {
                 var metadataResponse = await Client.GetAsync("https://api.beatsaver.com/maps/hash/" + Uri.EscapeDataString(hash));
@@ -49,21 +69,44 @@ namespace SnipeFeed.PC.Services
                 if (!metadataResponse.IsSuccessStatusCode) return Fail("BeatSaver lookup failed (HTTP " + (int)metadataResponse.StatusCode + ").");
 
                 var map = JsonConvert.DeserializeObject<BeatSaverMap>(await metadataResponse.Content.ReadAsStringAsync());
-                var version = map?.versions?.FirstOrDefault(v => string.Equals(v.hash, hash, StringComparison.OrdinalIgnoreCase))
-                    ?? map?.versions?.FirstOrDefault();
-                if (version == null || string.IsNullOrWhiteSpace(version.downloadURL)) return Fail("BeatSaver did not provide a download for this map.");
+                // Only the version matching the score's hash: installing a
+                // different version would never match the post-install lookup
+                // and silently changes the map under the score.
+                var version = map?.versions?.FirstOrDefault(v => string.Equals(v.hash, hash, StringComparison.OrdinalIgnoreCase));
+                if (version == null || string.IsNullOrWhiteSpace(version.downloadURL))
+                    return Fail("This score's map version is no longer available on BeatSaver.");
 
                 var zipBytes = await Client.GetByteArrayAsync(version.downloadURL);
                 if (zipBytes == null || zipBytes.Length == 0) return Fail("The map download was empty.");
 
+                // Unity APIs (Application.dataPath) before leaving the main
+                // thread; the disk work below runs on the pool.
                 var customLevels = Path.GetFullPath(Path.Combine(Application.dataPath, "CustomLevels"));
-                Directory.CreateDirectory(customLevels);
-                var shortHash = hash.Length > 10 ? hash.Substring(0, 10) : hash;
+                var shortHash = hash.Substring(0, 10);
                 var target = Path.Combine(customLevels, "SnipeFeed_" + shortHash);
+                temp = Path.Combine(customLevels, ".snipefeed_tmp_" + shortHash);
+                var tempForWork = temp;
 
-                if (Directory.Exists(target)) Directory.Delete(target, true);
-                Directory.CreateDirectory(target);
-                ExtractZipSafely(zipBytes, target);
+                // Deleting, decompressing and writing a multi-MB map is
+                // seconds of blocking IO — off the render thread, or every
+                // install freezes VR. Extract to a temp sibling and move into
+                // place so a failure never leaves a half-written level folder.
+                await Task.Run(() =>
+                {
+                    Directory.CreateDirectory(customLevels);
+                    if (Directory.Exists(tempForWork)) Directory.Delete(tempForWork, true);
+                    Directory.CreateDirectory(tempForWork);
+                    ExtractZipSafely(zipBytes, tempForWork);
+                    if (Directory.Exists(target)) Directory.Delete(target, true);
+                    // Windows can hold the deleted dir in a pending state
+                    // briefly; a short retry absorbs that race.
+                    for (var attempt = 0; ; attempt++)
+                    {
+                        try { Directory.Move(tempForWork, target); break; }
+                        catch (IOException) when (attempt < 3) { Thread.Sleep(50); }
+                    }
+                });
+                temp = null; // moved into place; nothing to clean up
 
                 Plugin.Log?.Info("Installed map " + hash + " to " + target);
                 await RefreshSongCore();
@@ -76,12 +119,27 @@ namespace SnipeFeed.PC.Services
             }
             catch (TaskCanceledException)
             {
+                CleanupPartialInstall(temp);
                 return Fail("Map download timed out.");
             }
             catch (Exception ex)
             {
                 Plugin.Log?.Error("Map install failed: " + ex);
+                CleanupPartialInstall(temp);
                 return Fail("Map install failed: " + ex.Message);
+            }
+        }
+
+        private static void CleanupPartialInstall(string temp)
+        {
+            if (temp == null) return;
+            try
+            {
+                if (Directory.Exists(temp)) Directory.Delete(temp, true);
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log?.Warn("Couldn't remove a partial install folder: " + ex.Message);
             }
         }
 
@@ -91,6 +149,16 @@ namespace SnipeFeed.PC.Services
             using (var memory = new MemoryStream(bytes, false))
             using (var archive = new ZipArchive(memory, ZipArchiveMode.Read))
             {
+                // A hostile or corrupt archive must not be able to fill the
+                // disk; real beatmaps are tens of MB at most.
+                long declaredTotal = 0;
+                foreach (var entry in archive.Entries)
+                {
+                    declaredTotal += entry.Length;
+                    if (declaredTotal > MaxExtractedBytes)
+                        throw new InvalidDataException("Map archive is unreasonably large.");
+                }
+
                 foreach (var entry in archive.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.FullName)) continue;

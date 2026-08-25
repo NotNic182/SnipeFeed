@@ -41,21 +41,21 @@ namespace SnipeFeed.PC.Utils
         // colored difficulty and stars at the end.
         public static string TitleLine(FeedEntry e)
         {
-            var line = Escape(e.SongName);
-            if (!string.IsNullOrEmpty(e.SongAuthor)) line += " <color=#BBCCDD>- " + Escape(e.SongAuthor) + "</color>";
-            if (!string.IsNullOrEmpty(e.Mapper)) line += " <size=80%><color=#8899AA>[" + Escape(e.Mapper) + "]</color></size>";
+            var line = EscapeForTmp(e.SongName);
+            if (!string.IsNullOrEmpty(e.SongAuthor)) line += " <color=#BBCCDD>- " + EscapeForTmp(e.SongAuthor) + "</color>";
+            if (!string.IsNullOrEmpty(e.Mapper)) line += " <size=80%><color=#8899AA>[" + EscapeForTmp(e.Mapper) + "]</color></size>";
             line += DiffAndStars(e, "70%");
             return line;
         }
 
-        public static string PlayerLine(FeedEntry e) => "<b>" + Escape(e.PlayerName) + "</b>";
+        public static string PlayerLine(FeedEntry e) => "<b>" + EscapeForTmp(e.PlayerName) + "</b>";
 
         public static string StatsLine(FeedEntry e)
         {
             var line = FormatAcc(e.Accuracy);
             if (e.Pp > 0) line += "  <color=#B856FF>" + e.Pp.ToString("0", CultureInfo.InvariantCulture) + "<size=70%>pp</size></color>";
             if (e.FullCombo) line += "  <color=#57FF8A>FC</color>";
-            if (!string.IsNullOrEmpty(e.Modifiers)) line += "  <color=#999999>+" + Escape(e.Modifiers) + "</color>";
+            if (!string.IsNullOrEmpty(e.Modifiers)) line += "  <color=#999999>+" + EscapeForTmp(e.Modifiers) + "</color>";
             return line;
         }
 
@@ -63,13 +63,13 @@ namespace SnipeFeed.PC.Utils
         // difficulty/stars, stats, then how long ago the score was set.
         public static string DetailText(FeedEntry e)
         {
-            var info = "<size=140%><b>" + Escape(e.SongName) + "</b></size>";
+            var info = "<size=140%><b>" + EscapeForTmp(e.SongName) + "</b></size>";
 
             if (!string.IsNullOrEmpty(e.SongAuthor) || !string.IsNullOrEmpty(e.Mapper))
             {
-                var byline = Escape(e.SongAuthor);
+                var byline = EscapeForTmp(e.SongAuthor);
                 if (!string.IsNullOrEmpty(e.Mapper))
-                    byline += (string.IsNullOrEmpty(byline) ? "[" : " [") + Escape(e.Mapper) + "]";
+                    byline += (string.IsNullOrEmpty(byline) ? "[" : " [") + EscapeForTmp(e.Mapper) + "]";
                 info += "\n<color=#888888>" + byline + "</color>";
             }
 
@@ -112,6 +112,10 @@ namespace SnipeFeed.PC.Utils
             }
         }
 
-        private static string Escape(string text) => (text ?? "").Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;");
+        // TMP does not decode HTML entities — "&amp;" renders literally — so
+        // entity escaping is wrong here. Instead neutralize markup: a
+        // zero-width space directly after every '<' keeps the character
+        // visible while making it impossible to open a tag.
+        public static string EscapeForTmp(string text) => (text ?? "").Replace("<", "<​");
     }
 }

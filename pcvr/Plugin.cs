@@ -6,6 +6,7 @@ using IPA.Config.Stores;
 using IPA.Logging;
 using SnipeFeed.PC.Configuration;
 using SnipeFeed.PC.UI;
+using System;
 using System.Threading.Tasks;
 
 namespace SnipeFeed.PC
@@ -28,9 +29,18 @@ namespace SnipeFeed.PC
         [OnStart]
         public async Task OnStart()
         {
-            await MainMenuAwaiter.WaitForMainMenuAsync();
-            RegisterGameplayTab();
-            MainMenuAwaiter.MainMenuInitializing += RegisterGameplayTab;
+            try
+            {
+                await MainMenuAwaiter.WaitForMainMenuAsync();
+                RegisterGameplayTab();
+                MainMenuAwaiter.MainMenuInitializing += RegisterGameplayTab;
+            }
+            catch (Exception ex)
+            {
+                // BSIPA does not observe this task; without the catch a
+                // startup failure is a silently missing tab with no log line.
+                Log?.Error("SnipeFeed failed to start: " + ex);
+            }
         }
 
         [OnExit]
@@ -41,17 +51,31 @@ namespace SnipeFeed.PC
 
         private static void RegisterGameplayTab()
         {
-            var setup = GameplaySetup.Instance;
-            if (setup == null || ReferenceEquals(setup, _registeredGameplaySetup)) return;
+            try
+            {
+                var setup = GameplaySetup.Instance;
+                if (setup == null)
+                {
+                    Log?.Warn("GameplaySetup.Instance is null; the Snipe Feed tab was not added this menu load.");
+                    return;
+                }
+                if (ReferenceEquals(setup, _registeredGameplaySetup)) return;
 
-            setup.AddTab(
-                "Snipe Feed",
-                "SnipeFeed.PC.UI.SnipeFeedView.bsml",
-                View,
-                MenuType.All);
+                setup.AddTab(
+                    "Snipe Feed",
+                    "SnipeFeed.PC.UI.SnipeFeedView.bsml",
+                    View,
+                    MenuType.All);
 
-            _registeredGameplaySetup = setup;
-            Log?.Info("Registered Snipe Feed gameplay setup tab.");
+                _registeredGameplaySetup = setup;
+                Log?.Info("Registered Snipe Feed gameplay setup tab.");
+            }
+            catch (Exception ex)
+            {
+                // Thrown from BSML's MainMenuInitializing multicast this
+                // would abort every later subscriber (other mods included).
+                Log?.Error("Registering the Snipe Feed tab failed: " + ex);
+            }
         }
     }
 }

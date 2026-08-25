@@ -273,7 +273,7 @@ namespace SnipeFeed.PC.UI
             catch (Exception ex)
             {
                 Plugin.Log?.Error("UI refresh failed: " + ex);
-                SetStatus("Couldn't refresh Snipe Feed: " + ex.Message);
+                SetStatus("Couldn't refresh Snipe Feed: " + Formatting.EscapeForTmp(ex.Message));
             }
             finally
             {
@@ -419,7 +419,7 @@ namespace SnipeFeed.PC.UI
                 var install = await SongInstaller.DownloadAndInstallAsync(entry.SongHash);
                 if (!install.Success)
                 {
-                    ShowInstallOutcome(entry, "<color=#ff5555>" + install.Error + "</color>");
+                    ShowInstallOutcome(entry, "<color=#ff5555>" + Formatting.EscapeForTmp(install.Error) + "</color>");
                     return;
                 }
 
@@ -442,7 +442,7 @@ namespace SnipeFeed.PC.UI
             catch (Exception ex)
             {
                 Plugin.Log?.Error("Download & play failed: " + ex);
-                ShowInstallOutcome(entry, "<color=#ff5555>Map install failed: " + ex.Message + "</color>");
+                ShowInstallOutcome(entry, "<color=#ff5555>Map install failed: " + Formatting.EscapeForTmp(ex.Message) + "</color>");
             }
             finally
             {

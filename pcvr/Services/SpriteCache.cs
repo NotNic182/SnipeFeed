@@ -16,6 +16,11 @@ namespace SnipeFeed.PC.Services
     // continuations resume on Unity's synchronization context.
     internal static class SpriteCache
     {
+        private const int MaxCachedSprites = 256;
+        // Oldest-first access order; a hit moves the URL to the back. Sized
+        // above one full 100-score feed's covers+avatars so eviction only
+        // bites across MANY refreshes, never inside the current view.
+        private static readonly List<string> LoadOrder = new List<string>();
         private static readonly Dictionary<string, Sprite> Loaded = new Dictionary<string, Sprite>();
         private static readonly HashSet<string> Failed = new HashSet<string>();
         private static readonly Dictionary<string, List<Action<Sprite>>> Pending = new Dictionary<string, List<Action<Sprite>>>();
@@ -34,6 +39,8 @@ namespace SnipeFeed.PC.Services
 
             if (Loaded.TryGetValue(url, out var sprite) && sprite != null)
             {
+                LoadOrder.Remove(url);
+                LoadOrder.Add(url);
                 onSprite(sprite);
                 return;
             }
@@ -78,6 +85,8 @@ namespace SnipeFeed.PC.Services
             }
 
             Loaded[url] = sprite;
+            LoadOrder.Add(url);
+            EvictIfNeeded();
             if (callbacks == null) return;
             foreach (var callback in callbacks)
             {
@@ -88,6 +97,25 @@ namespace SnipeFeed.PC.Services
                 catch (Exception ex)
                 {
                     Plugin.Log?.Warn("Sprite callback failed: " + ex.Message);
+                }
+            }
+        }
+
+        private static void EvictIfNeeded()
+        {
+            while (LoadOrder.Count > MaxCachedSprites)
+            {
+                var oldest = LoadOrder[0];
+                LoadOrder.RemoveAt(0);
+                if (!Loaded.TryGetValue(oldest, out var sprite)) continue;
+                Loaded.Remove(oldest);
+                if (sprite != null)
+                {
+                    // The sprite is a thin wrapper; the texture holds the
+                    // memory. Cells re-request evicted URLs on their next
+                    // bind, so a stale reference at worst re-downloads.
+                    if (sprite.texture != null) UnityEngine.Object.Destroy(sprite.texture);
+                    UnityEngine.Object.Destroy(sprite);
                 }
             }
         }

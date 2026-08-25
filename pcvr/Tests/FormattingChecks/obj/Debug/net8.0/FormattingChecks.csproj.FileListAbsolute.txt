@@ -1,0 +1,14 @@
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.AssemblyInfoInputs.cache
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.AssemblyInfo.cs
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.csproj.CoreCompileInputs.cache
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\bin\Debug\net8.0\FormattingChecks.exe
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\bin\Debug\net8.0\FormattingChecks.deps.json
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\bin\Debug\net8.0\FormattingChecks.runtimeconfig.json
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\bin\Debug\net8.0\FormattingChecks.dll
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\bin\Debug\net8.0\FormattingChecks.pdb
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.dll
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\refint\FormattingChecks.dll
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.pdb
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\FormattingChecks.genruntimeconfig.cache
+C:\Users\notni\Music\SnipeFeed-main\SnipeFeed-main\pcvr\Tests\FormattingChecks\obj\Debug\net8.0\ref\FormattingChecks.dll

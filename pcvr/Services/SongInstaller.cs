@@ -143,6 +143,21 @@ namespace SnipeFeed.PC.Services
             }
         }
 
+        // Declared sizes in the central directory can be forged; the only
+        // trustworthy count is bytes actually produced by decompression.
+        private static void CopyBounded(Stream input, Stream output, ref long totalWritten)
+        {
+            var buffer = new byte[81920];
+            int read;
+            while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+            {
+                totalWritten += read;
+                if (totalWritten > MaxExtractedBytes)
+                    throw new InvalidDataException("Map archive is unreasonably large.");
+                output.Write(buffer, 0, read);
+            }
+        }
+
         private static void ExtractZipSafely(byte[] bytes, string target)
         {
             var root = Path.GetFullPath(target).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -159,6 +174,7 @@ namespace SnipeFeed.PC.Services
                         throw new InvalidDataException("Map archive is unreasonably large.");
                 }
 
+                long actualTotal = 0;
                 foreach (var entry in archive.Entries)
                 {
                     if (string.IsNullOrEmpty(entry.FullName)) continue;
@@ -176,7 +192,7 @@ namespace SnipeFeed.PC.Services
                     if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
                     using (var input = entry.Open())
                     using (var output = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None))
-                        input.CopyTo(output);
+                        CopyBounded(input, output, ref actualTotal);
                 }
             }
         }

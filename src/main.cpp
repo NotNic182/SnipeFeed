@@ -5,6 +5,7 @@
 #include "custom-types/shared/register.hpp"
 
 #include "bsml/shared/BSML.hpp"
+#include "libcurl/shared/curl.h"
 
 // Called at the early stages of game loading
 MOD_EXPORT void setup(CModInfo* info) noexcept {
@@ -19,6 +20,11 @@ MOD_EXPORT void setup(CModInfo* info) noexcept {
 
 // Called later on in the game loading - a good time to install function hooks
 MOD_EXPORT void late_load() {
+    // libcurl's lazy global init is not thread-safe, and this mod runs up
+    // to 4 feed workers plus image threads concurrently — init exactly once
+    // before any of them can race it.
+    curl_global_init(CURL_GLOBAL_ALL);
+
     il2cpp_functions::Init();
     custom_types::Register::AutoRegister();
 

@@ -37,15 +37,27 @@ namespace SnipeFeed::Web {
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, WriteToString);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out);
         curl_easy_setopt(curl, CURLOPT_USERAGENT, userAgent.c_str());
-        // Matches the approach used by the BeatLeader Quest mod: Android's cert
-        // store is not reliably available to native code, so peer verification
-        // is disabled. Endpoints are public read-only data over HTTPS.
-        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+        // Threaded use: signal-based timeouts would deliver SIGALRM to a
+        // random thread.
+        curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+        // Advertise every codec this build can decode; BeatLeader's 100-score
+        // JSON pages compress ~10x.
+        curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+        // Verify TLS peers against Android's system CA store — a c_rehash
+        // style directory of PEM files, which CAPATH understands. This mod
+        // sends the BeatLeader login cookie; without verification anyone who
+        // can spoof DNS on the local network can read it.
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+        curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+        curl_easy_setopt(curl, CURLOPT_CAPATH, "/system/etc/security/cacerts");
 
         long httpCode = 0;
         auto res = curl_easy_perform(curl);
         if (res != CURLE_OK) {
             SnipeFeedLogger.error("curl failed for {}: {} {}", url, static_cast<int>(res), curl_easy_strerror(res));
+            if (res == CURLE_PEER_FAILED_VERIFICATION || res == CURLE_SSL_CACERT_BADFILE)
+                SnipeFeedLogger.error("TLS verification failed — the system CA path may be unusable with this libcurl build; see docs/superpowers/plans/2026-08-25-reliability-fixes.md Task 6");
+
             curl_slist_free_all(headers);
             curl_easy_cleanup(curl);
             return -static_cast<long>(res);

@@ -101,6 +101,11 @@ namespace SnipeFeed {
         auto notSpace = [](unsigned char c) { return !std::isspace(c); };
         input.erase(input.begin(), std::find_if(input.begin(), input.end(), notSpace));
         input.erase(std::find_if(input.rbegin(), input.rend(), notSpace).base(), input.end());
+        // A pasted profile URL can carry ?tab=... or #fragment — those are
+        // never part of the id/alias.
+        auto cut = input.find_first_of("?#");
+        if (cut != std::string::npos)
+            input = input.substr(0, cut);
         while (!input.empty() && input.back() == '/')
             input.pop_back();
         auto slash = input.find_last_of('/');
@@ -120,29 +125,43 @@ namespace SnipeFeed {
         return getDataDir("bl") + "cookies/cookies.txt";
     }
 
+    enum class FriendFeedOutcome {
+        Loaded,        // entries parsed
+        Empty,         // authenticated 200 with no scores — a real answer
+        NetworkError,  // transport failed; the public path would fail too
+        Unavailable,   // HTTP error / bad body — expired login etc.; fall back
+    };
+
     // Preferred path: the same feed the BeatLeader website home page shows,
     // in a single request. Requires the BeatLeader mod login cookie.
-    static bool TryFetchFriendScores(std::string const& cookieFile, int count, std::vector<FeedEntry>& outEntries) {
+    static FriendFeedOutcome TryFetchFriendScores(std::string const& cookieFile, int count, std::vector<FeedEntry>& outEntries) {
         std::string url = std::string(API_URL) + "/user/friendScores?sortBy=date&order=desc&page=1&count=" + std::to_string(count);
         std::string body;
         long code = Web::Get(url, TIMEOUT_SECONDS, body, cookieFile);
+        if (code < 0) {
+            SnipeFeedLogger.warn("friendScores transport error ({})", code);
+            return FriendFeedOutcome::NetworkError;
+        }
         if (code != 200) {
             SnipeFeedLogger.info("friendScores unavailable (HTTP {}), falling back to public API", code);
-            return false;
+            return FriendFeedOutcome::Unavailable;
         }
 
         rapidjson::Document doc;
         doc.Parse(body);
-        if (doc.HasParseError() || !doc.IsObject()) return false;
+        if (doc.HasParseError() || !doc.IsObject()) return FriendFeedOutcome::Unavailable;
         auto data = doc.FindMember("data");
-        if (data == doc.MemberEnd() || !data->value.IsArray()) return false;
+        if (data == doc.MemberEnd() || !data->value.IsArray()) return FriendFeedOutcome::Unavailable;
 
         FollowedPlayer unknown{"", "?", ""};
         for (auto const& score : data->value.GetArray()) {
             if (score.IsObject())
                 ParseScore(score, unknown, outEntries);
         }
-        return !outEntries.empty();
+        // An empty page is a real, successful answer (no follows, or no
+        // recent scores) — folding it into failure sends a logged-in user
+        // down the public path and tells them their login is broken.
+        return outEntries.empty() ? FriendFeedOutcome::Empty : FriendFeedOutcome::Loaded;
     }
 
     // Resolves an alias (e.g. "nic") or pasted URL to a numeric player ID via
@@ -257,22 +276,37 @@ namespace SnipeFeed {
 
         std::thread worker([playerInput = std::move(playerInput), maxPlayers, scoresPerPlayer, feedCount,
                             onProgress = std::move(onProgress), onDone = std::move(onDone)] {
-            FeedResult result;
+            try {
+                FeedResult result;
 
-            // Path 1: reuse the BeatLeader mod login for the real friends feed.
+                // Path 1: reuse the BeatLeader mod login for the real friends feed.
             std::string cookieFile = BeatLeaderCookieFile();
             std::error_code fsError;
             if (std::filesystem::exists(cookieFile, fsError)) {
                 if (onProgress) onProgress("Loading your BeatLeader friends feed...");
-                if (TryFetchFriendScores(cookieFile, feedCount, result.entries)) {
-                    std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
-                        return a.timepost > b.timepost;
-                    });
-                    result.success = true;
-                    onDone(std::move(result));
-                    return;
+                switch (TryFetchFriendScores(cookieFile, feedCount, result.entries)) {
+                    case FriendFeedOutcome::Loaded:
+                        std::sort(result.entries.begin(), result.entries.end(), [](FeedEntry const& a, FeedEntry const& b) {
+                            return a.timepost > b.timepost;
+                        });
+                        result.success = true;
+                        onDone(std::move(result));
+                        return;
+                    case FriendFeedOutcome::Empty:
+                        result.success = true;
+                        result.error = "No recent scores from the players you follow yet.\nFollow players on beatleader.com, then press Refresh.";
+                        onDone(std::move(result));
+                        return;
+                    case FriendFeedOutcome::NetworkError:
+                        // The public path rides the same network — falling
+                        // through would waste 15s and blame the login.
+                        result.error = "Network error. Check your connection.";
+                        onDone(std::move(result));
+                        return;
+                    case FriendFeedOutcome::Unavailable:
+                        result.entries.clear();
+                        break;
                 }
-                result.entries.clear();
             }
 
             // Path 2: public API using the configured ID or alias.
@@ -313,7 +347,11 @@ namespace SnipeFeed {
                         size_t i = nextIdx.fetch_add(1);
                         if (i >= following.size()) break;
                         std::vector<FeedEntry> local;
-                        FetchRecentScores(following[i], scoresPerPlayer, local);
+                        try {
+                            FetchRecentScores(following[i], scoresPerPlayer, local);
+                        } catch (std::exception const& e) {
+                            SnipeFeedLogger.warn("Score fetch for {} crashed: {}", following[i].id, e.what());
+                        }
                         size_t done = doneCount.fetch_add(1) + 1;
                         if (onProgress)
                             onProgress("Loading scores... " + std::to_string(done) + "/" + std::to_string(following.size()));
@@ -338,6 +376,14 @@ namespace SnipeFeed {
                 result.success = true;
             }
             onDone(std::move(result));
+            } catch (std::exception const& e) {
+                // An exception escaping a detached thread is std::terminate —
+                // a whole-game crash. Turn it into a feed error instead.
+                SnipeFeedLogger.error("Feed fetch crashed: {}", e.what());
+                FeedResult crashResult;
+                crashResult.error = "Something went wrong loading the feed. Press Refresh to try again.";
+                onDone(std::move(crashResult));
+            }
         });
         worker.detach();
     }

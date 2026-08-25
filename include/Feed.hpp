@@ -30,6 +30,10 @@ namespace SnipeFeed {
         std::vector<FeedEntry> entries;
     };
 
+    // On success with ZERO entries, `error` carries a user-facing info
+    // message ("you don't follow anyone yet") — it is not a failure and
+    // callers must not treat it as one.
+
     // Fetches the feed on a detached worker thread. Tries the BeatLeader mod
     // login cookie first (real friends feed); falls back to the public API
     // using `playerInput` (numeric ID, alias, or pasted profile URL).

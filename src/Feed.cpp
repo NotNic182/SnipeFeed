@@ -276,7 +276,16 @@ namespace SnipeFeed {
 
         std::thread worker([playerInput = std::move(playerInput), maxPlayers, scoresPerPlayer, feedCount,
                             onProgress = std::move(onProgress), onDone = std::move(onDone)] {
+            // onDone must fire exactly once; if the callback itself
+            // throws, the catch below must not fire it again.
+            bool doneCalled = false;
+            auto finish = [&](FeedResult r) {
+                doneCalled = true;
+                onDone(std::move(r));
+            };
+
             try {
+
                 FeedResult result;
 
                 // Path 1: reuse the BeatLeader mod login for the real friends feed.
@@ -290,18 +299,18 @@ namespace SnipeFeed {
                                 return a.timepost > b.timepost;
                             });
                             result.success = true;
-                            onDone(std::move(result));
+                            finish(std::move(result));
                             return;
                         case FriendFeedOutcome::Empty:
                             result.success = true;
                             result.error = "No recent scores from the players you follow yet.\nFollow players on beatleader.com, then press Refresh.";
-                            onDone(std::move(result));
+                            finish(std::move(result));
                             return;
                         case FriendFeedOutcome::NetworkError:
                             // The public path rides the same network — falling
                             // through would waste 15s and blame the login.
                             result.error = "Network error. Check your connection.";
-                            onDone(std::move(result));
+                            finish(std::move(result));
                             return;
                         case FriendFeedOutcome::Unavailable:
                             result.entries.clear();
@@ -313,7 +322,7 @@ namespace SnipeFeed {
                 std::string input = SanitizeInput(playerInput);
                 if (input.empty()) {
                     result.error = "Couldn't use a BeatLeader mod login on this headset.\nLog into the BeatLeader mod, then press Refresh.\n(Or set PlayerId in SnipeFeed's config file to use the public API.)";
-                    onDone(std::move(result));
+                    finish(std::move(result));
                     return;
                 }
 
@@ -321,7 +330,7 @@ namespace SnipeFeed {
                 if (!IsNumeric(input)) {
                     if (onProgress) onProgress("Resolving '" + input + "'...");
                     if (!ResolvePlayer(input, self, result.error)) {
-                        onDone(std::move(result));
+                        finish(std::move(result));
                         return;
                     }
                 }
@@ -329,7 +338,7 @@ namespace SnipeFeed {
                 if (onProgress) onProgress("Loading players you follow...");
                 std::vector<FollowedPlayer> following;
                 if (!FetchFollowing(self.id, maxPlayers, following, result.error)) {
-                    onDone(std::move(result));
+                    finish(std::move(result));
                     return;
                 }
 
@@ -375,14 +384,16 @@ namespace SnipeFeed {
                 } else {
                     result.success = true;
                 }
-                onDone(std::move(result));
+                finish(std::move(result));
             } catch (std::exception const& e) {
                 // An exception escaping a detached thread is std::terminate —
                 // a whole-game crash. Turn it into a feed error instead.
                 SnipeFeedLogger.error("Feed fetch crashed: {}", e.what());
-                FeedResult crashResult;
-                crashResult.error = "Something went wrong loading the feed. Press Refresh to try again.";
-                onDone(std::move(crashResult));
+                if (!doneCalled) {
+                    FeedResult crashResult;
+                    crashResult.error = "Something went wrong loading the feed. Press Refresh to try again.";
+                    onDone(std::move(crashResult));
+                }
             }
         });
         worker.detach();

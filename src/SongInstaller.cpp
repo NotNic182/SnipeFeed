@@ -118,9 +118,18 @@ namespace SnipeFeed::Installer {
 
     void DownloadAndInstallAsync(std::string hash, std::function<void(bool, std::string)> onDone) {
         std::thread worker([hash = ToLower(std::move(hash)), onDone = std::move(onDone)] {
+            // onDone must fire exactly once; if the callback itself
+            // throws, the catch below must not fire it again.
+            bool doneCalled = false;
+            auto finish = [&](bool ok, std::string message) {
+                doneCalled = true;
+                onDone(ok, std::move(message));
+            };
+
             try {
+
                 if (!IsValidHash(hash)) {
-                    onDone(false, "This score has an invalid map hash.");
+                    finish(false, "This score has an invalid map hash.");
                     return;
                 }
 
@@ -128,22 +137,22 @@ namespace SnipeFeed::Installer {
                 std::string meta;
                 long code = Web::Get("https://api.beatsaver.com/maps/hash/" + hash, META_TIMEOUT, meta);
                 if (code < 0) {
-                    onDone(false, "Network error. Check your connection.");
+                    finish(false, "Network error. Check your connection.");
                     return;
                 }
                 if (code == 404) {
-                    onDone(false, "Map not found on BeatSaver.");
+                    finish(false, "Map not found on BeatSaver.");
                     return;
                 }
                 if (code != 200) {
-                    onDone(false, "BeatSaver lookup failed (HTTP " + std::to_string(code) + ").");
+                    finish(false, "BeatSaver lookup failed (HTTP " + std::to_string(code) + ").");
                     return;
                 }
 
                 rapidjson::Document doc;
                 doc.Parse(meta);
                 if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("versions") || !doc["versions"].IsArray() || doc["versions"].GetArray().Empty()) {
-                    onDone(false, "Unexpected BeatSaver response.");
+                    finish(false, "Unexpected BeatSaver response.");
                     return;
                 }
 
@@ -160,7 +169,7 @@ namespace SnipeFeed::Installer {
                     }
                 }
                 if (downloadUrl.empty()) {
-                    onDone(false, "This score's map version is no longer available on BeatSaver.");
+                    finish(false, "This score's map version is no longer available on BeatSaver.");
                     return;
                 }
 
@@ -168,11 +177,11 @@ namespace SnipeFeed::Installer {
                 std::string zipData;
                 code = Web::Get(downloadUrl, DOWNLOAD_TIMEOUT, zipData);
                 if (code < 0) {
-                    onDone(false, "Network error while downloading the map.");
+                    finish(false, "Network error while downloading the map.");
                     return;
                 }
                 if (code != 200 || zipData.empty()) {
-                    onDone(false, "Download failed (HTTP " + std::to_string(code) + ").");
+                    finish(false, "Download failed (HTTP " + std::to_string(code) + ").");
                     return;
                 }
 
@@ -187,14 +196,14 @@ namespace SnipeFeed::Installer {
                 std::filesystem::remove_all(tempFolder, fsError);
                 std::filesystem::create_directories(tempFolder, fsError);
                 if (fsError) {
-                    onDone(false, "Couldn't create the install folder.");
+                    finish(false, "Couldn't create the install folder.");
                     return;
                 }
 
                 std::string extractError;
                 if (!ExtractArchiveSafely(zipData, tempFolder, extractError)) {
                     std::filesystem::remove_all(tempFolder, fsError);
-                    onDone(false, extractError);
+                    finish(false, extractError);
                     return;
                 }
 
@@ -203,16 +212,17 @@ namespace SnipeFeed::Installer {
                 std::filesystem::rename(tempFolder, targetFolder, fsError);
                 if (fsError) {
                     std::filesystem::remove_all(tempFolder, fsError);
-                    onDone(false, "Couldn't move the map into Custom Levels.");
+                    finish(false, "Couldn't move the map into Custom Levels.");
                     return;
                 }
 
                 SnipeFeedLogger.info("Installed map {} to {}", hash, targetFolder);
-                onDone(true, "");
+                finish(true, "");
             } catch (std::exception const& e) {
                 // An exception escaping a detached thread is std::terminate.
                 SnipeFeedLogger.error("Map install crashed: {}", e.what());
-                onDone(false, "Something went wrong installing the map.");
+                if (!doneCalled)
+                    onDone(false, "Something went wrong installing the map.");
             }
         });
         worker.detach();

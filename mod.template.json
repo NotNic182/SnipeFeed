@@ -3,7 +3,7 @@
   "_QPVersion": "0.1.1",
   "id": "${mod_id}",
   "name": "SnipeFeed",
-  "version": "2.0.1",
+  "version": "${version}",
   "author": "NotNic",
   "modloader": "Scotland2",
   "packageId": "com.beatgames.beatsaber",

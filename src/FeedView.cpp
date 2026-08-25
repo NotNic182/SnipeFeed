@@ -56,13 +56,22 @@ namespace {
         int selected = -1;
         bool busyPlaying = false;
         long long lastFetchTime = 0;        // unix time of last successful fetch
-        // The most recently activated view (weak). Refresh completions
-        // update THIS, not the view that started the fetch — the tab
-        // GameObject is destroyed and recreated across menu visits, and a
-        // fetch begun by a dead view must still populate the live one.
-        UnityW<SnipeFeed::FeedView> activeView;
+        // GC-rooted handle to the most recently activated view. UnityW was
+        // wrong here: it is a raw pointer whose alive-check DEREFERENCES that
+        // pointer, and stored in native memory it neither keeps the object
+        // alive nor nulls when the GC collects it — a use-after-free on
+        // every async completion. SafePtrUnity holds a GC handle (memory
+        // stays valid) and its bool checks m_CachedPtr on live memory, so it
+        // correctly reports Unity destruction. Main thread only.
+        SafePtrUnity<SnipeFeed::FeedView> activeView;
     };
     FeedState state;
+
+    // The live view to deliver deferred results to, or nullptr. Main thread
+    // only — resolving a SafePtr is a GC-handle read.
+    SnipeFeed::FeedView* ActiveViewAlive() {
+        return state.activeView ? state.activeView.ptr() : nullptr;
+    }
 
     constexpr auto FILTER_ALL = "All players";
     constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
@@ -195,21 +204,24 @@ void FeedView::OnCellClicked(int listIdx) {
         modalAvatar->set_sprite(nullptr);
         modalAvatar->set_color(FeedCell::PlaceholderTint());
     }
-    auto weakSelf = UnityW<FeedView>(this);
+    // SpriteCache callbacks are created, stored, invoked and destroyed on
+    // the main thread only, so a SafePtrUnity capture is legal here and
+    // both roots the view and reports its destruction.
+    SafePtrUnity<FeedView> safeSelf(this);
     if (!e.coverUrl.empty()) {
-        SpriteCache::GetSprite(e.coverUrl, [weakSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
-            if (!weakSelf || !weakSelf->modalCover) return;
-            if (!weakSelf->modalPendingCover || static_cast<std::string>(weakSelf->modalPendingCover) != url) return;
-            weakSelf->modalCover->set_sprite(sprite);
-            weakSelf->modalCover->set_color(FeedCell::LoadedTint());
+        SpriteCache::GetSprite(e.coverUrl, [safeSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
+            if (!safeSelf || !safeSelf->modalCover) return;
+            if (!safeSelf->modalPendingCover || static_cast<std::string>(safeSelf->modalPendingCover) != url) return;
+            safeSelf->modalCover->set_sprite(sprite);
+            safeSelf->modalCover->set_color(FeedCell::LoadedTint());
         });
     }
     if (!e.avatarUrl.empty()) {
-        SpriteCache::GetSprite(e.avatarUrl, [weakSelf, url = e.avatarUrl](UnityEngine::Sprite* sprite) {
-            if (!weakSelf || !weakSelf->modalAvatar) return;
-            if (!weakSelf->modalPendingAvatar || static_cast<std::string>(weakSelf->modalPendingAvatar) != url) return;
-            weakSelf->modalAvatar->set_sprite(sprite);
-            weakSelf->modalAvatar->set_color(FeedCell::LoadedTint());
+        SpriteCache::GetSprite(e.avatarUrl, [safeSelf, url = e.avatarUrl](UnityEngine::Sprite* sprite) {
+            if (!safeSelf || !safeSelf->modalAvatar) return;
+            if (!safeSelf->modalPendingAvatar || static_cast<std::string>(safeSelf->modalPendingAvatar) != url) return;
+            safeSelf->modalAvatar->set_sprite(sprite);
+            safeSelf->modalAvatar->set_color(FeedCell::LoadedTint());
         });
     }
 
@@ -300,44 +312,48 @@ void FeedView::PlaySelected() {
     if (playButton) playButton->set_interactable(false);
     if (playButtonText) playButtonText->set_text("Downloading...");
 
-    auto weakSelf = UnityW<FeedView>(this);
-    Installer::DownloadAndInstallAsync(entry.songHash, [weakSelf, entry](bool success, std::string error) {
-        BSML::MainThreadScheduler::Schedule([weakSelf, entry, success, error = std::move(error)] {
+    // This callback crosses the installer's non-attached worker thread —
+    // constructing/copying/destroying a SafePtr there is not legal (GC
+    // handle ops need an attached thread), so it captures only plain data
+    // and resolves the live view on the main thread via state.activeView.
+    Installer::DownloadAndInstallAsync(entry.songHash, [entry](bool success, std::string error) {
+        BSML::MainThreadScheduler::Schedule([entry, success, error = std::move(error)]() mutable {
             if (!success) {
                 state.busyPlaying = false;
-                if (weakSelf) {
-                    if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Download & Play");
-                    if (weakSelf->playButton) weakSelf->playButton->set_interactable(true);
-                    if (weakSelf->detailText) weakSelf->detailText->set_text("<color=#ff5555>" + error + "</color>");
+                if (auto* view = ActiveViewAlive()) {
+                    if (view->playButtonText) view->playButtonText->set_text("Download & Play");
+                    if (view->playButton) view->playButton->set_interactable(true);
+                    if (view->detailText) view->detailText->set_text("<color=#ff5555>" + error + "</color>");
                 }
                 return;
             }
 
-            if (weakSelf && weakSelf->playButtonText)
-                weakSelf->playButtonText->set_text("Installing...");
+            if (auto* view = ActiveViewAlive(); view && view->playButtonText)
+                view->playButtonText->set_text("Installing...");
             SongCore::API::Loading::RefreshSongs(false);
             SongCore::API::Loading::RefreshLevelPacks();
 
             // Same grace period the BeatLeader mod uses before opening.
-            BSML::MainThreadScheduler::ScheduleAfterTime(5, [weakSelf, entry]() mutable {
+            BSML::MainThreadScheduler::ScheduleAfterTime(5, [entry]() {
                 state.busyPlaying = false;
                 auto level = Installer::GetInstalledLevel(entry.songHash);
-                if (!weakSelf) return;
-                if (weakSelf->playButton) weakSelf->playButton->set_interactable(true);
+                auto* view = ActiveViewAlive();
+                if (!view) return;
+                if (view->playButton) view->playButton->set_interactable(true);
                 if (level) {
-                    if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Play");
+                    if (view->playButtonText) view->playButtonText->set_text("Play");
                     // Only auto-launch if the user is still on this tab —
                     // firing the solo re-entry while they browse another
                     // tab or screen would yank them away without warning.
-                    if (weakSelf->get_isActiveAndEnabled()) {
-                        weakSelf->LaunchLevel(level);
-                    } else if (weakSelf->statusText) {
-                        weakSelf->statusText->set_text("Downloaded — press Play when you're back.");
+                    if (view->get_isActiveAndEnabled()) {
+                        view->LaunchLevel(level);
+                    } else if (view->statusText) {
+                        view->statusText->set_text("Downloaded — press Play when you're back.");
                     }
                 } else {
-                    if (weakSelf->playButtonText) weakSelf->playButtonText->set_text("Download & Play");
-                    if (weakSelf->detailText)
-                        weakSelf->detailText->set_text("Downloaded! The song is still loading — it will appear in Custom Levels shortly.");
+                    if (view->playButtonText) view->playButtonText->set_text("Download & Play");
+                    if (view->detailText)
+                        view->detailText->set_text("Downloaded! The song is still loading — it will appear in Custom Levels shortly.");
                 }
             });
         });
@@ -373,7 +389,7 @@ void FeedView::Refresh() {
         [generation](std::string progress) {
             BSML::MainThreadScheduler::Schedule([generation, progress = std::move(progress)] {
                 if (generation != state.refreshGeneration.load()) return;
-                auto view = state.activeView;
+                auto* view = ActiveViewAlive();
                 if (view && view->statusText)
                     view->statusText->set_text(progress);
             });
@@ -387,7 +403,7 @@ void FeedView::Refresh() {
                     state.entries.clear();
                     state.players.clear();
                     state.selected = -1;
-                    auto view = state.activeView;
+                    auto* view = ActiveViewAlive();
                     if (view) {
                         view->RebuildFilter();
                         view->RebuildList();
@@ -415,7 +431,7 @@ void FeedView::Refresh() {
                 // current again — let previously-failed images retry.
                 SnipeFeed::SpriteCache::ClearFailures();
 
-                auto view = state.activeView;
+                auto* view = ActiveViewAlive();
                 if (view) {
                     view->RebuildFilter();
                     view->RebuildList();
@@ -575,6 +591,19 @@ void FeedView::BuildUI() {
     playButtonText = playButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
 }
 
+void FeedView::OnDestroy() {
+    // Un-pin the GC root when the pinned view is the one being destroyed;
+    // a dead view must not stay rooted until the next activation.
+    // state.activeView = SafePtrUnity<FeedView>() is not legal here either
+    // (same deleted operator= as DidActivate) — clear() is the equivalent
+    // reset to empty. The bool check guards ptr(): SafePtrUnity::ptr()
+    // throws/crashes on an empty or already-dead handle rather than
+    // returning nullptr, and a FeedView destroyed before ever being
+    // activated leaves state.activeView empty.
+    if (state.activeView && state.activeView.ptr() == this)
+        state.activeView.clear();
+}
+
 void FeedView::DidActivate(bool firstActivation) {
     if (!listData) {
         // The tab's RectTransform may not have its final height on the very
@@ -585,9 +614,9 @@ void FeedView::DidActivate(bool firstActivation) {
             height = rect->get_rect().get_height();
         if (height <= 30.0f && buildAttempts < 5) {
             buildAttempts++;
-            auto weakSelf = UnityW<FeedView>(this);
-            BSML::MainThreadScheduler::Schedule([weakSelf]() mutable {
-                if (weakSelf) weakSelf->DidActivate(false);
+            SafePtrUnity<FeedView> safeSelf(this);
+            BSML::MainThreadScheduler::Schedule([safeSelf]() mutable {
+                if (safeSelf) safeSelf->DidActivate(false);
             });
             return;
         }
@@ -596,7 +625,13 @@ void FeedView::DidActivate(bool firstActivation) {
 
     // In-flight fetch results and progress land on the most recently
     // activated view — that's us now.
-    state.activeView = UnityW<FeedView>(this);
+    // SafePtrUnity's copy-assignment is implicitly deleted (it declares a
+    // move constructor, which per [class.copy.assign] suppresses the
+    // implicit copy-assign operator), and the only other operator= overloads
+    // take T*/T& by IMPLICIT conversion — SafePtrUnity's operator T* is
+    // explicit, so it can't satisfy them either. emplace() performs the
+    // equivalent rooting without going through operator=.
+    state.activeView.emplace(this);
 
     // Defensive: if a hide was ever interrupted (menu hop, tab switch),
     // clear the modal the moment the tab shows again.

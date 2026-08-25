@@ -38,6 +38,7 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
     DECLARE_INSTANCE_FIELD(StringW, modalPendingAvatar);
 
     DECLARE_INSTANCE_METHOD(void, Refresh);
+    DECLARE_INSTANCE_METHOD(void, OnDestroy);
 
    public:
     // Registered as the gameplay setup tab callback in main.cpp.

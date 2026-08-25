@@ -1,0 +1,11 @@
+# Quest build outputs / restored deps
+build/
+extern/
+ndkpath.txt
+*.qmod
+
+# PC build outputs
+pcvr/bin/
+pcvr/obj/
+pcvr/Tests/bin/
+pcvr/Tests/obj/

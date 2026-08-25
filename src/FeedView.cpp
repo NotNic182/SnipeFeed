@@ -19,7 +19,9 @@
 #include "GlobalNamespace/MainFlowCoordinator.hpp"
 #include "GlobalNamespace/SoloFreePlayFlowCoordinator.hpp"
 #include "HMUI/FlowCoordinator.hpp"
+#include "HMUI/ModalView.hpp"
 #include "HMUI/ScrollView.hpp"
+#include "HMUI/SimpleTextDropdown.hpp"
 #include "HMUI/ViewController.hpp"
 #include "UnityEngine/Color.hpp"
 #include "UnityEngine/GameObject.hpp"
@@ -112,6 +114,22 @@ void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActiv
 void FeedView::RebuildFilter() {
     if (!filterContainer) return;
 
+    // If the dropdown's option list is open, destroying it mid-show orphans
+    // its modal blocker and can eat all menu input until a scene change.
+    // _modalView is declared on DropdownWithTableView (SimpleTextDropdown's
+    // base class) in the installed headers, typed UnityW<HMUI::ModalViewBase>
+    // — a UnityW (so .unsafePtr() applies), but the BASE class, and _isShown
+    // is only declared on the derived HMUI::ModalView. A checked cast (same
+    // il2cpp_utils::try_cast idiom as IsSoloFlowOnTop above) bridges that
+    // instead of the brief's direct pointer.
+    if (auto* dropdown = filterContainer->GetComponentInChildren<HMUI::SimpleTextDropdown*>()) {
+        if (auto* modalBase = dropdown->_modalView.unsafePtr()) {
+            auto modal = il2cpp_utils::try_cast<HMUI::ModalView>(modalBase);
+            if (modal.has_value() && (*modal)->_isShown)
+                (*modal)->Hide(false, nullptr);
+        }
+    }
+
     for (int i = filterContainer->get_childCount() - 1; i >= 0; i--)
         UnityEngine::Object::Destroy(filterContainer->GetChild(i)->get_gameObject());
 
@@ -178,20 +196,26 @@ void FeedView::OnCellClicked(int listIdx) {
     auto const& e = state.entries[state.selected];
 
     if (detailText) {
-        std::string info = "<size=140%><b>" + e.songName + "</b></size>";
+        std::string info = "<size=140%><b>" + Format::Escape(e.songName) + "</b></size>";
         if (!e.songAuthor.empty() || !e.mapper.empty()) {
-            std::string byline = e.songAuthor;
+            std::string byline = Format::Escape(e.songAuthor);
             if (!e.mapper.empty())
-                byline += (byline.empty() ? "[" : " [") + e.mapper + "]";
+                byline += (byline.empty() ? "[" : " [") + Format::Escape(e.mapper) + "]";
             info += "\n<color=#888888>" + byline + "</color>";
         }
-        if (!e.difficulty.empty() || e.stars > 0.0f)
-            info += "\n<size=85%>" + Format::SongLine(e).substr(e.songName.size()) + "</size>";
+        if (!e.difficulty.empty() || e.stars > 0.0f) {
+            std::string diffLine;
+            if (!e.difficulty.empty())
+                diffLine += "  <size=75%><color=" + std::string(Format::DiffColor(e.difficulty)) + ">" + Format::DiffLabel(e.difficulty) + "</color></size>";
+            if (e.stars > 0.0f)
+                diffLine += std::format("  <size=75%><color=#ffaa22>{:.1f}★</color></size>", e.stars);
+            info += "\n<size=85%>" + diffLine + "</size>";
+        }
         info += "\n" + Format::StatsLine(e);
         info += "\n<size=75%><color=#777777>" + Format::TimeAgo(e.timepost) + "</color></size>";
         detailText->set_text(info);
     }
-    if (modalPlayerText) modalPlayerText->set_text(e.playerName);
+    if (modalPlayerText) modalPlayerText->set_text(Format::Escape(e.playerName));
 
     // Images, with the same stale-guard the cells use.
     modalPendingCover = e.coverUrl;
@@ -323,7 +347,7 @@ void FeedView::PlaySelected() {
                 if (auto* view = ActiveViewAlive()) {
                     if (view->playButtonText) view->playButtonText->set_text("Download & Play");
                     if (view->playButton) view->playButton->set_interactable(true);
-                    if (view->detailText) view->detailText->set_text("<color=#ff5555>" + error + "</color>");
+                    if (view->detailText) view->detailText->set_text("<color=#ff5555>" + Format::Escape(error) + "</color>");
                 }
                 return;
             }
@@ -400,15 +424,21 @@ void FeedView::Refresh() {
                 if (generation != state.refreshGeneration.load()) return;
 
                 if (!result.success) {
-                    state.entries.clear();
-                    state.players.clear();
-                    state.selected = -1;
                     auto* view = ActiveViewAlive();
+                    // Keep the previous feed on a failed refresh — a network
+                    // blip shouldn't blank a perfectly good list.
+                    if (!state.entries.empty()) {
+                        if (view && view->statusText)
+                            view->statusText->set_text(result.error + "\n(Showing the previous scores.)");
+                        return;
+                    }
+                    state.selected = -1;
                     if (view) {
                         view->RebuildFilter();
                         view->RebuildList();
                         if (view->statusText)
                             view->statusText->set_text(result.error);
+                        if (view->detailModal) view->detailModal->Hide();
                     }
                     return;
                 }
@@ -435,6 +465,8 @@ void FeedView::Refresh() {
                 if (view) {
                     view->RebuildFilter();
                     view->RebuildList();
+                    if (state.entries.empty() && view->statusText && !result.error.empty())
+                        view->statusText->set_text(result.error);
                     if (view->detailModal) view->detailModal->Hide();
                 }
             });
@@ -637,8 +669,7 @@ void FeedView::DidActivate(bool firstActivation) {
     // clear the modal the moment the tab shows again.
     if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
-    bool stale = state.entries.empty()
-        || (static_cast<long long>(std::time(nullptr)) - state.lastFetchTime) > REFRESH_MAX_AGE_SECONDS;
+    bool stale = (static_cast<long long>(std::time(nullptr)) - state.lastFetchTime) > REFRESH_MAX_AGE_SECONDS;
     if (stale) {
         Refresh();
     } else {

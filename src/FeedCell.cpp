@@ -76,7 +76,7 @@ void FeedCell::SetData(FeedEntry const& entry, int rank) {
     else
         rankText->set_text(std::format("<color={}>{}</color>", RankColor(rank), rank));
     songText->set_text(Format::TitleLine(entry));
-    playerText->set_text("<b>" + entry.playerName + "</b>");
+    playerText->set_text("<b>" + Format::Escape(entry.playerName) + "</b>");
     statsText->set_text(Format::StatsLine(entry));
     timeText->set_text(Format::TimeAgo(entry.timepost));
 

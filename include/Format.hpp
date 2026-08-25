@@ -14,6 +14,21 @@
 // consistently.
 namespace SnipeFeed::Format {
 
+    // TMP parses '<' as markup, and feed strings (song names like "<3",
+    // player names) must not be able to open tags. A zero-width space
+    // (U+200B) directly after every '<' keeps the character visible while
+    // breaking tag parsing. TMP does NOT decode HTML entities, so
+    // &lt;-style escaping would render literally.
+    inline std::string Escape(std::string const& text) {
+        std::string out;
+        out.reserve(text.size());
+        for (char c : text) {
+            out += c;
+            if (c == '<') out += "\xE2\x80\x8B";
+        }
+        return out;
+    }
+
     inline std::string TimeAgo(long long timepost) {
         if (timepost <= 0) return "";
         long long diff = static_cast<long long>(std::time(nullptr)) - timepost;
@@ -47,7 +62,7 @@ namespace SnipeFeed::Format {
     }
 
     inline std::string SongLine(FeedEntry const& e) {
-        std::string line = e.songName;
+        std::string line = Escape(e.songName);
         if (!e.difficulty.empty())
             line += "  <size=75%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
         if (e.stars > 0.0f)
@@ -60,18 +75,18 @@ namespace SnipeFeed::Format {
         std::string pp = FormatPP(e.pp);
         if (!pp.empty()) line += "  " + pp;
         if (e.fullCombo) line += "  <color=#57FF8A>FC</color>";
-        if (!e.modifiers.empty()) line += "  <color=#999999>+" + e.modifiers + "</color>";
+        if (!e.modifiers.empty()) line += "  <color=#999999>+" + Escape(e.modifiers) + "</color>";
         return line;
     }
 
     // The feed cell's top row: "Song Name - Artist [mapper]" with small
     // colored difficulty and stars at the end.
     inline std::string TitleLine(FeedEntry const& e) {
-        std::string line = e.songName;
+        std::string line = Escape(e.songName);
         if (!e.songAuthor.empty())
-            line += " <color=#BBCCDD>- " + e.songAuthor + "</color>";
+            line += " <color=#BBCCDD>- " + Escape(e.songAuthor) + "</color>";
         if (!e.mapper.empty())
-            line += " <size=80%><color=#8899AA>[" + e.mapper + "]</color></size>";
+            line += " <size=80%><color=#8899AA>[" + Escape(e.mapper) + "]</color></size>";
         if (!e.difficulty.empty())
             line += "  <size=70%><color=" + std::string(DiffColor(e.difficulty)) + ">" + DiffLabel(e.difficulty) + "</color></size>";
         if (e.stars > 0.0f)

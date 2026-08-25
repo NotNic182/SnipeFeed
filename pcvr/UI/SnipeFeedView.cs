@@ -237,17 +237,26 @@ namespace SnipeFeed.PC.UI
                     config.FeedCount,
                     SetStatus);
 
-                _entries.Clear();
-                _selected = null;
-
                 if (!result.Success)
                 {
-                    UpdateFilters();
-                    RebuildList();
-                    SetStatus(result.Error);
+                    // Keep the previous feed on a failed refresh — replacing
+                    // good rows with an empty list turns a network blip into
+                    // a broken-looking tab.
+                    if (_entries.Count > 0)
+                    {
+                        SetStatus(result.Error + "\n(Showing the previous scores.)");
+                    }
+                    else
+                    {
+                        UpdateFilters();
+                        RebuildList();
+                        SetStatus(result.Error);
+                    }
                     return;
                 }
 
+                _entries.Clear();
+                _selected = null;
                 _entries.AddRange(result.Entries);
                 _lastFetch = DateTimeOffset.UtcNow;
 
@@ -258,6 +267,8 @@ namespace SnipeFeed.PC.UI
                 UpdateFilters();
                 RebuildList();
                 HideModal(false);
+                if (_entries.Count == 0 && !string.IsNullOrEmpty(result.Info))
+                    SetStatus(result.Info);
             }
             catch (Exception ex)
             {
@@ -393,41 +404,37 @@ namespace SnipeFeed.PC.UI
             if (_installing || _selected == null || string.IsNullOrWhiteSpace(_selected.SongHash)) return;
             var entry = _selected;
 
-            var level = SongInstaller.GetInstalledLevel(entry.SongHash);
-            if (level != null)
-            {
-                LaunchLevel(level);
-                return;
-            }
-
-            _installing = true;
-            SetPlayButton("Downloading...", false);
-
             try
             {
+                var level = SongInstaller.GetInstalledLevel(entry.SongHash);
+                if (level != null)
+                {
+                    LaunchLevel(level);
+                    return;
+                }
+
+                _installing = true;
+                SetPlayButton("Downloading...", false);
+
                 var install = await SongInstaller.DownloadAndInstallAsync(entry.SongHash);
                 if (!install.Success)
                 {
-                    SetPlayButton("Download & Play", true);
-                    SetDetail("<color=#ff5555>" + install.Error + "</color>");
+                    ShowInstallOutcome(entry, "<color=#ff5555>" + install.Error + "</color>");
                     return;
                 }
 
-                SetPlayButton("Installing...", false);
                 level = install.Level ?? SongInstaller.GetInstalledLevel(entry.SongHash);
                 if (level == null)
                 {
-                    SetPlayButton("Download & Play", true);
-                    SetDetail("Downloaded! The song is still loading — it will appear in Custom Levels shortly.");
+                    ShowInstallOutcome(entry, "Downloaded! The song is still loading — it will appear in Custom Levels shortly.");
                     return;
                 }
 
-                SetPlayButton("Play", true);
-
-                // Only auto-launch if the user is still on this tab —
-                // firing the solo re-entry while they browse another tab or
-                // screen would yank them away without warning.
-                if (_rootObject != null && _rootObject.activeInHierarchy)
+                // Only auto-launch if the user is still on this tab AND this
+                // score is still the selected one — launching score A while
+                // score B's modal is open (or from another screen) would yank
+                // them somewhere they didn't ask to go.
+                if (_rootObject != null && _rootObject.activeInHierarchy && ReferenceEquals(_selected, entry))
                     LaunchLevel(level);
                 else
                     SetStatus("Downloaded — press Play when you're back.");
@@ -435,13 +442,27 @@ namespace SnipeFeed.PC.UI
             catch (Exception ex)
             {
                 Plugin.Log?.Error("Download & play failed: " + ex);
-                SetPlayButton("Download & Play", true);
-                SetDetail("<color=#ff5555>Map install failed: " + ex.Message + "</color>");
+                ShowInstallOutcome(entry, "<color=#ff5555>Map install failed: " + ex.Message + "</color>");
             }
             finally
             {
                 _installing = false;
+                // Recompute the real button state for whatever score is
+                // selected NOW instead of hardcoding a label that may belong
+                // to a different score.
+                if (_selected != null)
+                    UpdatePlayButton();
             }
+        }
+
+        // Puts an install outcome where the user is actually looking: the
+        // modal if this score is still the open one, else the status line.
+        private void ShowInstallOutcome(FeedEntry entry, string message)
+        {
+            if (ReferenceEquals(_selected, entry))
+                SetDetail(message);
+            else
+                SetStatus(message);
         }
 
         private void LaunchLevel(BeatmapLevel level)
@@ -464,19 +485,34 @@ namespace SnipeFeed.PC.UI
                 var parent = youngest._parentFlowCoordinator;
                 if (parent != null)
                 {
-                    if (!SongInstaller.PrimeSoloFlow(level))
+                    try
                     {
-                        // The modal is already hidden — leave SOME feedback
-                        // instead of silently doing nothing.
-                        SetStatus("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
-                        return;
+                        if (!SongInstaller.PrimeSoloFlow(level))
+                        {
+                            // The modal is already hidden — leave SOME feedback
+                            // instead of silently doing nothing.
+                            SetStatus("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
+                            return;
+                        }
+                        Plugin.Log?.Info("LaunchLevel: re-entering solo with " + level.songName);
+                        parent.DismissFlowCoordinator(
+                            youngest,
+                            ViewController.AnimationDirection.Horizontal,
+                            (Action)(() =>
+                            {
+                                try { SongInstaller.PressSoloButton(); }
+                                catch (Exception ex) { Plugin.Log?.Error("PressSoloButton failed: " + ex); }
+                            }),
+                            false);
                     }
-                    Plugin.Log?.Info("LaunchLevel: re-entering solo with " + level.songName);
-                    parent.DismissFlowCoordinator(
-                        youngest,
-                        ViewController.AnimationDirection.Horizontal,
-                        (Action)(() => SongInstaller.PressSoloButton()),
-                        false);
+                    catch (Exception ex)
+                    {
+                        // An HMUI transition already in progress can throw; a
+                        // half-dismissed flow is exactly the menu corruption
+                        // this mod promises never to cause.
+                        Plugin.Log?.Error("Solo re-entry failed: " + ex);
+                        SetStatus("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
+                    }
                     return;
                 }
             }
@@ -491,10 +527,12 @@ namespace SnipeFeed.PC.UI
                 try
                 {
                     picker.SelectLevel(level);
+                    SetStatus("Selected in the song list.");
                 }
                 catch (Exception ex)
                 {
                     Plugin.Log?.Warn("Could not select level in active picker: " + ex.Message);
+                    SetStatus("Couldn't select the song here — open it from Custom Levels.");
                 }
                 return;
             }
@@ -523,12 +561,16 @@ namespace SnipeFeed.PC.UI
         private void HideModal(bool animated)
         {
             if (_detailModal == null) return;
-            var originalParent = _modalOriginalParent;
-            _detailModal.Hide(animated, () =>
-            {
-                if (_detailModal != null && originalParent != null)
-                    _detailModal.transform.SetParent(originalParent, true);
-            });
+            _detailModal.Hide(animated, null);
+            // Reparent back inline: Show(_, moveToCenter: true) moved the
+            // modal under the shared center container, and HMUI does not
+            // reliably invoke a hide callback for a modal that a click-off
+            // already hid — relying on the callback leaks the modal into the
+            // shared container across menu rebuilds. Every caller passes
+            // animated=false, so an immediate reparent cannot fight an
+            // animation.
+            if (_modalOriginalParent != null && _detailModal.transform.parent != _modalOriginalParent)
+                _detailModal.transform.SetParent(_modalOriginalParent, true);
         }
 
         private static void ResetImage(ImageView image)

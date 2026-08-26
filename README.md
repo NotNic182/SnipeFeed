@@ -2,12 +2,11 @@
 
 Your BeatLeader following feed inside Beat Saber — on **Quest standalone and PCVR**. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
 
-## Two versions, one repo
-
 <img width="3840" height="2160" alt="13da867f7f904380a0319fcbcde4550e" src="https://github.com/user-attachments/assets/5086db22-b704-4fec-b021-d133d8abe3ee" />
 
 <img width="3840" height="2160" alt="35a20023bfd743aebc921cbb030e8ce9" src="https://github.com/user-attachments/assets/a93091b1-e995-4f55-abf9-2fc43ccd1181" />
 
+## Two versions, one repo
 | Platform | Source | Download |
 |---|---|---|
 | **Quest standalone** | this directory (C++ / Scotland2 qmod) | [Releases](https://github.com/NotNic182/SnipeFeed/releases) — `SnipeFeed.qmod` |

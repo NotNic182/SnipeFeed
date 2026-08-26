@@ -6,7 +6,7 @@ Verdicts: **Quest — Needs fixes** (architecture solid, one crash-class bug on 
 
 Checkboxes track the fix phase.
 
-Status 2026-08-25: all items addressed — see docs/superpowers/plans/2026-08-25-reliability-fixes.md. Quest compile verification: yes; Quest on-device TLS smoke test: pending; PC compile verification: yes.
+Status 2026-08-25: all items addressed — see docs/superpowers/plans/2026-08-25-reliability-fixes.md. Quest compile verification: yes; Quest on-device TLS smoke test: PASSED 2026-08-25 (required shipping Mozilla's CA bundle — current Horizon OS keeps system CAs in the Conscrypt APEX; see commit cb70675); PC compile verification: yes; PC in-game test: passed 2026-08-25.
 
 ---
 

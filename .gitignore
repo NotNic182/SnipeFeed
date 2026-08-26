@@ -4,6 +4,9 @@ extern/
 ndkpath.txt
 *.qmod
 
+# Packaged PC release zips
+SnipeFeed.PC-*.zip
+
 # PC build outputs
 pcvr/bin/
 pcvr/obj/

@@ -13,7 +13,7 @@ Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in ev
 
 ## v2.0.1 fixes
 
-- **Quest TLS verification**: peer verification now enabled, checked against Android's system CA store (libcurl `CURLOPT_CAPATH`) — no CA bundle ships in the qmod; a bundled-`cacert.pem` + `CURLOPT_CAINFO` fallback is documented for devices whose libcurl build can't read CAPATH, but isn't shipped today.
+- **Quest TLS verification**: peer verification now enabled. The qmod ships Mozilla's CA bundle (`cacert.pem`, copied into the mod's ModData folder and used via libcurl `CURLOPT_CAINFO`) — newer Horizon OS builds keep system CAs in the Conscrypt APEX where native code can't read them. Android's system CA path remains as a fallback if the copy is missing.
 - **Async lifetime safety**: callbacks that cross from a worker thread capture no il2cpp/Unity pointers at all, only plain data — only callbacks that are guaranteed to run and die on the main thread capture Unity objects, via `SafePtrUnity`, to prevent use-after-free.
 - **Atomic map installs**: extraction now happens to a temp directory and renames into place, ensuring failed installs leave no corrupt level folders.
 - **Truthful error messages**: feed empty vs. network error now clearly distinguished; cookie reuse and fallback paths clearly documented in code.

@@ -41,6 +41,11 @@
     "libsnipefeed.so"
   ],
   "libraryFiles": [],
-  "fileCopies": [],
+  "fileCopies": [
+    {
+      "name": "cacert.pem",
+      "destination": "/sdcard/ModData/com.beatgames.beatsaber/Mods/snipefeed/cacert.pem"
+    }
+  ],
   "copyExtensions": []
 }

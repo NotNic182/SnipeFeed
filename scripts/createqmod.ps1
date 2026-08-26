@@ -70,6 +70,17 @@ foreach ($lib in $modJson.libraryFiles) {
     $filelist += $path
 }
 
+# fileCopies entries (e.g. the CA bundle) live at the repo root and must be
+# inside the archive for the installer to copy them to their destinations.
+foreach ($copy in $modJson.fileCopies) {
+    $path = "./" + $copy.name
+    if (-not (Test-Path $path)) {
+        Write-Output "Error: could not find file copy: $path"
+        exit 1
+    }
+    $filelist += $path
+}
+
 $zip = $qmodName + ".zip"
 $qmod = $qmodName + ".qmod"
 

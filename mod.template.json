@@ -13,5 +13,11 @@
   "lateModFiles": [
     "${binary}"
   ],
-  "libraryFiles": []
+  "libraryFiles": [],
+  "fileCopies": [
+    {
+      "name": "cacert.pem",
+      "destination": "/sdcard/ModData/com.beatgames.beatsaber/Mods/snipefeed/cacert.pem"
+    }
+  ]
 }

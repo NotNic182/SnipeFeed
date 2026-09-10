@@ -33,6 +33,8 @@ Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in ev
 
 The tab appears in the gameplay setup panel (left screen) in **every** mode — Solo/Party song selection, online multiplayer, campaign, and modded flows like **Multiplayer+** (QBeatSaberPlus) lobbies. Open the **Mods** tab on that panel and pick **Snipe Feed**.
 
+Inside Snipe Feed, use **Following** for the friends feed or **My Profile** for your BeatLeader summary and score history. My Profile shows PP, global/country rank, ranked average accuracy, and a bounded score list. Its dropdown asks BeatLeader to order the list by newest, stars high/low, or accuracy best/worst; the existing **Scores** stepper controls the page size (10–100).
+
 ## What the Play button does (per mode)
 
 Tap any score row to open its details. The button at the bottom adapts to where you are:
@@ -50,7 +52,7 @@ In Party mode the song is selected in place in the open picker on both platforms
 
 1. Install `SnipeFeed.qmod` (see Install below).
 2. Enter **Solo**, then on the left panel open the **Mods** tab and select **Snipe Feed**.
-3. If you are logged in inside the official BeatLeader mod, the feed loads automatically — nothing to enter. Then press **Refresh**.
+3. If you are logged in inside the official BeatLeader mod, the feed and **My Profile** load automatically — nothing to enter. Then press **Refresh**.
 
 No BeatLeader mod login? Put your BeatLeader player ID into the mod's config file (`ModData/.../Configs/snipefeed.json`, `PlayerId`) and the feed uses the public API instead.
 
@@ -77,14 +79,36 @@ qpm s qmod       # packages SnipeFeed.qmod
 ## How it works
 
 1. If the official BeatLeader mod's login cookie exists on the headset (`ModData/.../Mods/bl/cookies/cookies.txt`), one call to `GET api.beatleader.com/user/friendScores?sortBy=date&order=desc` returns the same feed the BeatLeader website home page shows. The cookie is read-only reused, never modified or logged.
-2.  Entries merged and sorted newest-first: player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, time ago.
+2. **My Profile** resolves the headset login through the same `GET /user/modinterface` endpoint used by the official Quest mod, falling back to the configured `PlayerId`. It then reads `GET /player/{id}/scores` with BeatLeader's documented `sortBy`, `order`, `page`, and `count` parameters.
+3. Entries are rendered with player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, and time ago. Missing/unranked star data is simply omitted.
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
+
+## Map style and rating tiers
+
+Each score row reserves a compact BeatLeader map indicator at the right edge. It uses only fields already included in that score's `leaderboard.difficulty` object, so it adds no requests and no image-cache entries.
+
+| BeatLeader data on the score | What SnipeFeed shows |
+|---|---|
+| `passRating`, `accRating`, and `techRating` are all numeric | Three plain colored tiers show the exact **Pass**, **Acc**, and **Tech** values. The detail modal shows the same values. |
+| No complete rating triple, but `type`, `styleTags`, or `speedTags` has a known bit | The authoritative style label is shown (for example **Speed**, **Midspeed**, **Acc**, **Tech**, **Linear**, or **Stream**). |
+| No complete rating triple and no recognized style metadata | The row shows the real difficulty status when available, otherwise **ratings unavailable**. The detail modal says the BeatLeader rating graph is unavailable. SnipeFeed does not infer a style or rating. |
+| Ranked map | Normally receives the three rating fields and therefore gets the exact tiers; its detail line says **Ranked**. If BeatLeader omits any field, SnipeFeed degrades to the label/unavailable rules above. |
+| Unranked or non-graphed map | Its detail line says **Unranked** when the status is present. It can still show an explicit BeatLeader type/tag, but never a fabricated rating or accuracy estimate. |
+
+Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed appear only when BeatLeader explicitly supplies those map-type bits.
+
+## Quest v3.3.2 features
+
+- **My Profile view**: switch between Following and your own BeatLeader profile, including PP, global/country rank, ranked average accuracy, score history, and server-side sorting by newest, stars, or accuracy.
+- **Exact rating tiers**: graphed maps show BeatLeader's Pass, Acc, and Tech values as compact colored text; unranked/non-graphed maps fall back to authoritative style/status text without estimates.
+- **Taller feed layout**: the list uses the measured gameplay-panel height without overlapping the game's tab strip.
+- **Side scrollbar**: grab and drag the always-visible bar or keep using the thumbstick. The old top/bottom caret controls are not created, leaving the full list height available for rows.
 
 ## v2.0.0 features
 
 - **Lives in the gameplay setup panel, everywhere**: the feed is a **Snipe Feed** tab in the left panel's **Mods** section — in Solo/Party, online multiplayer, campaign, and Multiplayer+ lobbies (`MenuType::All`). No more main-menu button.
-- **Full-height list**: the list is sized from the tab's actual measured height (60 units on 1.40.8) instead of a hardcoded guess — roughly 4½ compact rows, with working page arrows (they were being swallowed by the rows' touch surface).
+- **Full-height list**: the list is sized from the tab's actual measured height instead of a hardcoded guess. Quest v3.3.2 replaces the old page arrows with a draggable side scrollbar.
 - **Mode-aware Play button**: in-place selection where a song picker is open, the quick re-enter hop in Solo, and download-only in lobbies — the mod never dismisses an active lobby flow (doing so corrupts the menu state; learned the hard way).
 - **Modal fixes**: the detail popup closes instantly when launching and can never linger across menu transitions.
 
@@ -112,3 +136,17 @@ All requests run on a background thread with 15s timeouts; UI updates go through
 
 - Official OST/DLC map scores have no custom-song hash — their Play button is disabled ("Not a custom song").
 - Follows capped (default 20 players × 3 scores) in the public-API fallback path; the friends-feed path (BeatLeader login cookie) gets everything in one request.
+- My Profile displays one bounded page (10–100 scores), not an infinitely scrolling copy of the website.
+
+## Headset smoke test and rollback
+
+1. Install the qmod on Beat Saber `1.40.8_7379`, restart the game, and open **Mods → Snipe Feed** in Solo.
+2. Confirm **Following** still loads, filters by player, opens score details, and leaves installed/download actions unchanged.
+3. Find one ranked/graphed score and verify its colored Pass/Acc/Tech tiers match the exact values in the detail modal.
+4. Check an unranked or non-graphed score: verify an explicit BeatLeader style/status is shown when present, otherwise `ratings unavailable` / graph unavailable appears; no rating or accuracy estimate should be fabricated.
+5. Drag the side scrollbar and use the thumbstick; verify both scroll the list, the handle tracks the position, and no stock top/bottom caret remains. Scroll enough to recycle rows, then scroll back and confirm neither rating/style text, cover, nor avatar leaks from a previously bound score.
+6. Open **My Profile**. Confirm the logged-in BeatLeader account is shown (or the configured `PlayerId` fallback), then test all five order choices and verify unranked scores do not show a fake star value.
+7. Toggle between both views during a refresh, reopen the tab within two minutes to exercise the cache, and test an offline refresh plus an empty/invalid `PlayerId` without a BeatLeader login.
+8. In Solo, a Party picker, and a multiplayer lobby, open a profile score and verify the button respectively re-enters/selects, selects in place, or remains download-only.
+
+To roll back, uninstall this qmod and reinstall the previously known-good `SnipeFeed.qmod`; the only persistent SnipeFeed data is its config and CA bundle, so no score or BeatLeader account data needs migration. Restart Beat Saber after either operation.

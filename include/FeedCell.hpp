@@ -29,6 +29,13 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, playerText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, timeText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, statsText);
+    // Three per-axis rating tiers as plain colored text — "Pass <n>", "Acc
+    // <n>", "Tech <n>" (green/blue/red). Text-only after the triangle and the
+    // energy-bar graphic both failed on-device; no images, no geometry.
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, passLabel);
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, accLabel);
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, techLabel);
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, styleText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, chevronText);
 
     // Stale-guard: URLs this cell is currently waiting for. A reused cell
@@ -50,4 +57,6 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
    private:
     void RefreshBackground();
     void ResetImages();
+    void UpdateSkillDisplay(SnipeFeed::FeedEntry const& entry);
+    void ResetSkillDisplay();
 };

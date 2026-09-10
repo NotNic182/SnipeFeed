@@ -38,6 +38,10 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
     DECLARE_INSTANCE_FIELD(StringW, modalPendingAvatar);
 
     DECLARE_INSTANCE_METHOD(void, Refresh);
+    DECLARE_INSTANCE_METHOD(void, RefreshProfile);
+    DECLARE_INSTANCE_METHOD(void, RefreshCurrent);
+    DECLARE_INSTANCE_METHOD(void, ShowFollowing);
+    DECLARE_INSTANCE_METHOD(void, ShowProfile);
     DECLARE_INSTANCE_METHOD(void, OnDestroy);
 
    public:

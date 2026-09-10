@@ -6,7 +6,7 @@
   "info": {
     "name": "SnipeFeed",
     "id": "snipefeed",
-    "version": "2.0.1",
+    "version": "3.3.2",
     "url": null,
     "additionalData": {
       "overrideSoName": "libsnipefeed.so",

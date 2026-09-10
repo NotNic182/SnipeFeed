@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <climits>
+#include <cmath>
 #include <filesystem>
 #include <mutex>
 #include <thread>
@@ -34,6 +36,63 @@ namespace SnipeFeed {
         if (it != obj.MemberEnd() && it->value.IsNumber())
             return it->value.GetDouble();
         return 0.0;
+    }
+
+    static bool GetOptionalFloat(rapidjson::Value const& obj, char const* key, float& out) {
+        auto it = obj.FindMember(key);
+        if (it == obj.MemberEnd() || !it->value.IsNumber()) return false;
+        auto value = static_cast<float>(it->value.GetDouble());
+        if (!std::isfinite(value) || value < 0.0f) return false;
+        out = value;
+        return true;
+    }
+
+    static int GetInt(rapidjson::Value const& obj, char const* key, int fallback = 0) {
+        auto it = obj.FindMember(key);
+        if (it == obj.MemberEnd()) return fallback;
+        if (it->value.IsInt()) return it->value.GetInt();
+        if (it->value.IsUint() && it->value.GetUint() <= static_cast<unsigned>(INT_MAX))
+            return static_cast<int>(it->value.GetUint());
+        return fallback;
+    }
+
+    // Swagger permits both enum names and integer values; live score payloads
+    // currently use the integer bitmask/status representation.
+    static int GetMapTypeMask(rapidjson::Value const& difficulty) {
+        auto it = difficulty.FindMember("type");
+        if (it == difficulty.MemberEnd()) return 0;
+        if (it->value.IsInt()) return std::max(0, it->value.GetInt());
+        if (it->value.IsUint() && it->value.GetUint() <= static_cast<unsigned>(INT_MAX))
+            return static_cast<int>(it->value.GetUint());
+        if (!it->value.IsString()) return 0;
+        std::string value = it->value.GetString();
+        if (value == "acc") return 1;
+        if (value == "tech") return 2;
+        if (value == "midspeed") return 4;
+        if (value == "speed") return 8;
+        if (value == "fitbeat") return 16;
+        if (value == "linear") return 32;
+        if (value == "bombReset") return 64;
+        return 0;
+    }
+
+    static int GetMapStatus(rapidjson::Value const& difficulty) {
+        auto it = difficulty.FindMember("status");
+        if (it == difficulty.MemberEnd()) return -1;
+        if (it->value.IsInt()) return it->value.GetInt();
+        if (it->value.IsUint() && it->value.GetUint() <= static_cast<unsigned>(INT_MAX))
+            return static_cast<int>(it->value.GetUint());
+        if (!it->value.IsString()) return -1;
+        std::string value = it->value.GetString();
+        if (value == "unranked") return 0;
+        if (value == "nominated") return 1;
+        if (value == "qualified") return 2;
+        if (value == "ranked") return 3;
+        if (value == "unrankable") return 4;
+        if (value == "outdated") return 5;
+        if (value == "inevent") return 6;
+        if (value == "oST") return 7;
+        return -1;
     }
 
     // BeatLeader reports score time as "timepost" (number) with a legacy
@@ -90,6 +149,15 @@ namespace SnipeFeed {
             if (diff != lb->value.MemberEnd() && diff->value.IsObject()) {
                 entry.difficulty = GetString(diff->value, "difficultyName");
                 entry.stars = static_cast<float>(GetNumber(diff->value, "stars"));
+                entry.mapStatus = GetMapStatus(diff->value);
+                entry.mapTypeMask = GetMapTypeMask(diff->value);
+                entry.speedTags = GetInt(diff->value, "speedTags");
+                entry.styleTags = GetInt(diff->value, "styleTags");
+                bool hasPass = GetOptionalFloat(diff->value, "passRating", entry.passRating);
+                bool hasAcc = GetOptionalFloat(diff->value, "accRating", entry.accRating);
+                bool hasTech = GetOptionalFloat(diff->value, "techRating", entry.techRating);
+                entry.hasRatings = hasPass && hasAcc && hasTech
+                    && std::max({entry.passRating, entry.accRating, entry.techRating}) > 0.0f;
             }
         }
         outEntries.push_back(std::move(entry));
@@ -392,6 +460,180 @@ namespace SnipeFeed {
                 if (!doneCalled) {
                     FeedResult crashResult;
                     crashResult.error = "Something went wrong loading the feed. Press Refresh to try again.";
+                    onDone(std::move(crashResult));
+                }
+            }
+        });
+        worker.detach();
+    }
+
+    void FetchProfileAsync(
+        std::string playerInput,
+        std::string sortBy,
+        std::string order,
+        int count,
+        std::function<void(std::string)> onProgress,
+        std::function<void(ProfileResult)> onDone) {
+
+        count = std::clamp(count, 10, 100);
+        std::thread worker([playerInput = std::move(playerInput), sortBy = std::move(sortBy),
+                            order = std::move(order), count,
+                            onProgress = std::move(onProgress), onDone = std::move(onDone)] {
+            bool doneCalled = false;
+            auto finish = [&](ProfileResult result) {
+                doneCalled = true;
+                onDone(std::move(result));
+            };
+
+            try {
+                ProfileResult result;
+                std::string input = SanitizeInput(playerInput);
+                if (onProgress) onProgress("Loading your BeatLeader profile...");
+                // Parse a BeatLeader profile body into result.profile.
+                // Returns true only if the body is an object carrying a
+                // usable top-level player id — the modinterface shape is not
+                // verified in this workspace, so a 200 that does not resolve
+                // to a flat Player must NOT be treated as success.
+                auto tryPopulateProfile = [&](std::string const& body) -> bool {
+                    rapidjson::Document doc;
+                    doc.Parse(body);
+                    if (doc.HasParseError() || !doc.IsObject()) return false;
+                    std::string id = GetString(doc, "id");
+                    if (id.empty()) return false;
+                    result.profile = ProfileSummary{};
+                    result.profile.id = std::move(id);
+                    result.profile.name = GetString(doc, "name");
+                    result.profile.avatarUrl = GetString(doc, "avatar");
+                    result.profile.country = GetString(doc, "country");
+                    result.profile.pp = static_cast<float>(GetNumber(doc, "pp"));
+                    result.profile.rank = static_cast<int>(GetNumber(doc, "rank"));
+                    result.profile.countryRank = static_cast<int>(GetNumber(doc, "countryRank"));
+                    auto stats = doc.FindMember("scoreStats");
+                    if (stats != doc.MemberEnd() && stats->value.IsObject()) {
+                        result.profile.averageRankedAccuracy = static_cast<float>(GetNumber(stats->value, "averageRankedAccuracy"));
+                        result.profile.topPp = static_cast<float>(GetNumber(stats->value, "topPp"));
+                        result.profile.totalPlayCount = static_cast<int>(GetNumber(stats->value, "totalPlayCount"));
+                        result.profile.rankedPlayCount = static_cast<int>(GetNumber(stats->value, "rankedPlayCount"));
+                    }
+                    return true;
+                };
+
+                bool haveProfile = false;
+
+                // Prefer the official Quest mod's authenticated identity so
+                // "My Profile" really means the player logged in on this
+                // headset. Its own PlayerController uses this endpoint and
+                // the same read-only Netscape cookie jar. Fall back to
+                // SnipeFeed's configured public player ID/alias when that
+                // login is missing/expired (non-200) OR returns a 200 body we
+                // cannot resolve to a player id — a wrapped/unexpected shape
+                // must degrade to the fallback, not hard-error the tab.
+                std::string cookieFile = BeatLeaderCookieFile();
+                std::error_code fsError;
+                if (std::filesystem::exists(cookieFile, fsError)) {
+                    std::string authBody;
+                    long authCode = Web::Get(std::string(API_URL) + "/user/modinterface",
+                                             TIMEOUT_SECONDS, authBody, cookieFile);
+                    if (authCode == 200 && tryPopulateProfile(authBody)) {
+                        haveProfile = true;
+                    } else if (authCode == 200) {
+                        SnipeFeedLogger.info("Authenticated profile response had no usable player id, falling back to configured PlayerId");
+                    } else {
+                        SnipeFeedLogger.info("Authenticated profile unavailable (HTTP {}), falling back to configured PlayerId", authCode);
+                    }
+                }
+
+                // Public fallback: resolve the configured player id/alias.
+                if (!haveProfile) {
+                    if (input.empty()) {
+                        result.error = "Log into the BeatLeader mod, or set 'BeatLeader Player ID' in SnipeFeed's config.";
+                        finish(std::move(result));
+                        return;
+                    }
+                    std::string publicBody;
+                    long publicCode = Web::Get(std::string(API_URL) + "/player/" + input + "?stats=true",
+                                               TIMEOUT_SECONDS, publicBody);
+                    if (publicCode < 0) {
+                        result.error = "Network error. Check your connection.";
+                        finish(std::move(result));
+                        return;
+                    }
+                    if (publicCode == 404) {
+                        result.error = "No BeatLeader player found for '" + input + "'.";
+                        finish(std::move(result));
+                        return;
+                    }
+                    if (publicCode == 429) {
+                        result.error = "BeatLeader is rate-limiting requests. Wait a moment, then press Refresh.";
+                        finish(std::move(result));
+                        return;
+                    }
+                    if (publicCode != 200) {
+                        result.error = "BeatLeader profile request returned HTTP " + std::to_string(publicCode) + ".";
+                        finish(std::move(result));
+                        return;
+                    }
+                    if (!tryPopulateProfile(publicBody)) {
+                        result.error = "BeatLeader returned a profile without a player ID.";
+                        finish(std::move(result));
+                        return;
+                    }
+                }
+
+                if (onProgress) onProgress("Loading your scores...");
+                std::string scoresUrl = std::string(API_URL) + "/player/" + result.profile.id
+                    + "/scores?sortBy=" + sortBy + "&order=" + order
+                    + "&page=1&count=" + std::to_string(count);
+                std::string scoresBody;
+                long scoresCode = Web::Get(scoresUrl, TIMEOUT_SECONDS, scoresBody);
+                if (scoresCode < 0) {
+                    result.error = "Profile loaded, but the scores request failed. Check your connection.";
+                    finish(std::move(result));
+                    return;
+                }
+                if (scoresCode == 429) {
+                    result.error = "BeatLeader is rate-limiting requests. Wait a moment, then press Refresh.";
+                    finish(std::move(result));
+                    return;
+                }
+                if (scoresCode != 200) {
+                    result.error = "BeatLeader scores request returned HTTP " + std::to_string(scoresCode) + ".";
+                    finish(std::move(result));
+                    return;
+                }
+
+                rapidjson::Document scoresDoc;
+                scoresDoc.Parse(scoresBody);
+                if (scoresDoc.HasParseError() || !scoresDoc.IsObject()) {
+                    result.error = "Unexpected BeatLeader scores response.";
+                    finish(std::move(result));
+                    return;
+                }
+                auto data = scoresDoc.FindMember("data");
+                if (data == scoresDoc.MemberEnd() || !data->value.IsArray()) {
+                    result.error = "BeatLeader scores response did not include a score list.";
+                    finish(std::move(result));
+                    return;
+                }
+
+                FollowedPlayer self{result.profile.id, result.profile.name, result.profile.avatarUrl};
+                for (auto const& score : data->value.GetArray()) {
+                    if (score.IsObject()) ParseScore(score, self, result.entries);
+                }
+                auto metadata = scoresDoc.FindMember("metadata");
+                if (metadata != scoresDoc.MemberEnd() && metadata->value.IsObject())
+                    result.totalScores = static_cast<int>(GetNumber(metadata->value, "total"));
+                if (result.totalScores <= 0)
+                    result.totalScores = static_cast<int>(result.entries.size());
+
+                result.success = true;
+                if (result.entries.empty()) result.error = "No scores found for this profile.";
+                finish(std::move(result));
+            } catch (std::exception const& e) {
+                SnipeFeedLogger.error("Profile fetch crashed: {}", e.what());
+                if (!doneCalled) {
+                    ProfileResult crashResult;
+                    crashResult.error = "Something went wrong loading the profile. Press Refresh to try again.";
                     onDone(std::move(crashResult));
                 }
             }

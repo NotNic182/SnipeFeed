@@ -6,7 +6,9 @@
 #include <cmath>
 #include <ctime>
 #include <format>
+#include <initializer_list>
 #include <string>
+#include <utility>
 
 // Text formatting shared by the feed cells and the detail modal.
 // Difficulty colors match the official BeatLeader mod; stat colors are
@@ -50,6 +52,78 @@ namespace SnipeFeed::Format {
 
     inline std::string DiffLabel(std::string const& diff) {
         return diff == "ExpertPlus" ? "Expert+" : diff;
+    }
+
+    // BeatLeader publishes these as bitmasks. Keep the labels deterministic
+    // and bounded so a multi-tag map cannot consume the score row.
+    inline std::string MaskLabel(int mask, std::initializer_list<std::pair<int, char const*>> labels) {
+        std::string result;
+        int shown = 0;
+        int total = 0;
+        for (auto const& [bit, label] : labels) {
+            if ((mask & bit) == 0) continue;
+            total++;
+            if (shown >= 2) continue;
+            if (!result.empty()) result += " + ";
+            result += label;
+            shown++;
+        }
+        if (total > shown) result += " +";
+        return result;
+    }
+
+    inline std::string MapStyleLabel(FeedEntry const& e) {
+        auto type = MaskLabel(e.mapTypeMask, {
+            {1, "Acc"}, {2, "Tech"}, {4, "Midspeed"}, {8, "Speed"},
+            {16, "Fitbeat"}, {32, "Linear"}, {64, "Bomb Avoid."},
+        });
+        if (!type.empty()) return type;
+
+        // The detailed tags are server-authored map metadata, not an
+        // inference. Prefer style over raw speed when both are present.
+        auto style = MaskLabel(e.styleTags, {
+            {2, "True Acc"}, {4, "Standard Acc"}, {8, "Tech Acc"},
+            {16, "Tech"}, {1, "Linear"}, {32, "Reset"},
+            {64, "Bomb Reset"}, {128, "Balanced"}, {256, "Gimmick"},
+            {512, "Fitbeat"}, {1024, "Dance"}, {2048, "Challenge"},
+            {4096, "Jump"}, {8192, "Stream"}, {16384, "Stamina"},
+            {32768, "Paul"}, {65536, "Poodle"},
+        });
+        if (!style.empty()) return style;
+
+        return MaskLabel(e.speedTags, {
+            {1, "Slow"}, {2, "Medium"}, {4, "Fast"},
+            {8, "Extreme"}, {16, "Insane"},
+        });
+    }
+
+    inline char const* MapStatusLabel(int status) {
+        switch (status) {
+            case 0: return "Unranked";
+            case 1: return "Nominated";
+            case 2: return "Qualified";
+            case 3: return "Ranked";
+            case 4: return "Unrankable";
+            case 5: return "Outdated";
+            case 6: return "In event";
+            case 7: return "OST";
+            default: return "Status unavailable";
+        }
+    }
+
+    inline std::string MapStyleLine(FeedEntry const& e) {
+        std::string style = MapStyleLabel(e);
+        std::string line = "<color=#8899AA>" + std::string(MapStatusLabel(e.mapStatus)) + "</color>";
+        if (!style.empty()) line += "  <color=#D7E5F3>" + style + "</color>";
+        else line += "  <color=#778899>Map style unavailable</color>";
+        if (e.hasRatings) {
+            line += std::format(
+                "\n<size=80%><color=#57D68D>Pass {:.2f}</color>  <color=#5AA9FF>Acc {:.2f}</color>  <color=#FF6B6B>Tech {:.2f}</color></size>",
+                e.passRating, e.accRating, e.techRating);
+        } else {
+            line += "\n<size=80%><color=#778899>BeatLeader rating graph unavailable</color></size>";
+        }
+        return line;
     }
 
     inline std::string FormatAcc(float acc) {

@@ -2,10 +2,6 @@
 
 Your BeatLeader following feed inside Beat Saber — on **Quest standalone and PCVR**. Adds a **Snipe Feed** tab to the gameplay setup panel's **Mods** section — the left screen of song selection, next to tabs like ReeSabers and Qounters++ — that lists the most recent scores of every player you follow on BeatLeader — newest first — so you know exactly which maps to snipe without taking the headset off.
 
-<img width="3840" height="2160" alt="13da867f7f904380a0319fcbcde4550e" src="https://github.com/user-attachments/assets/5086db22-b704-4fec-b021-d133d8abe3ee" />
-
-<img width="3840" height="2160" alt="35a20023bfd743aebc921cbb030e8ce9" src="https://github.com/user-attachments/assets/a93091b1-e995-4f55-abf9-2fc43ccd1181" />
-
 ## Current status
 
 The current `main` branch contains the Quest **v3.3.2** update. The Quest package manifests report `3.3.2`, and the remote `v3.3.2` tag points to this update, which adds **My Profile**, server-side score ordering, exact Pass/Acc/Tech tiers, adaptive feed sizing, and the draggable side scrollbar documented below.

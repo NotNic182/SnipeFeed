@@ -6,6 +6,28 @@ Your BeatLeader following feed inside Beat Saber — on **Quest standalone and P
 
 <img width="3840" height="2160" alt="35a20023bfd743aebc921cbb030e8ce9" src="https://github.com/user-attachments/assets/a93091b1-e995-4f55-abf9-2fc43ccd1181" />
 
+## Current status
+
+The current `main` branch contains the Quest **v3.3.2** update. The Quest package manifests report `3.3.2`, and the remote `v3.3.2` tag points to this update, which adds **My Profile**, server-side score ordering, exact Pass/Acc/Tech tiers, adaptive feed sizing, and the draggable side scrollbar documented below.
+
+The PCVR project is a separate build target and remains at **2.0.1-pc.1** (`pcvr/manifest.json`); the v3.3.2 changes are Quest-only.
+
+## Screenshots and photo upload areas
+
+The screenshots below document the current Quest UI. To add or replace photos, upload the image beside this README (the existing files use the `ingame*.jpg` naming pattern) and add an image entry here with descriptive alt text. Keep one screenshot per workflow so the photo's purpose is clear.
+
+<img width="1024" alt="Following feed with the Snipe Feed tab and score rows" src="ingame.jpg" />
+
+<img width="1024" alt="Following feed showing multiple players" src="ingame2.jpg" />
+
+<img width="1024" alt="Following feed beside the recently played song panel" src="ingame3.jpg" />
+
+<img width="1024" alt="Scrolled Following feed with score rows and map indicators" src="ingame4.jpg" />
+
+<img width="1024" alt="Score details modal with the Play action" src="ingame5.jpg" />
+
+<img width="1024" alt="Following feed showing the draggable side scrollbar and rating tiers" src="ingame6.jpg" />
+
 ## Two versions, one repo
 | Platform | Source | Download |
 |---|---|---|

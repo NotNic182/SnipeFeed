@@ -8,12 +8,11 @@ The current `main` branch contains the Quest **v3.3.2** update. The Quest packag
 
 The PCVR project is a separate build target and remains at **2.0.1-pc.1** (`pcvr/manifest.json`); the v3.3.2 changes are Quest-only.
 
-## Screenshots 
-
-<img width="3840" height="2160" alt="6970d58f2e0d419395f96ee3aab8494d" src="https://github.com/user-attachments/assets/dbe2ecc0-7f42-4397-b61a-5c257a632ec5" />
-
+## Screenshots
 
 <img width="3840" height="2160" alt="915e0a83408e430386ea61d8ac17cca7" src="https://github.com/user-attachments/assets/80392e62-a826-49ed-a03b-92fd119c0e15" />
+
+<img width="3840" height="2160" alt="6970d58f2e0d419395f96ee3aab8494d" src="https://github.com/user-attachments/assets/dbe2ecc0-7f42-4397-b61a-5c257a632ec5" />
 
 ## Two versions, one repo
 | Platform | Source | Download |

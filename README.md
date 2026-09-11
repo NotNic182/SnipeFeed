@@ -12,21 +12,12 @@ The current `main` branch contains the Quest **v3.3.2** update. The Quest packag
 
 The PCVR project is a separate build target and remains at **2.0.1-pc.1** (`pcvr/manifest.json`); the v3.3.2 changes are Quest-only.
 
-## Screenshots and photo upload areas
+## Screenshots 
 
-The screenshots below document the current Quest UI. To add or replace photos, upload the image beside this README (the existing files use the `ingame*.jpg` naming pattern) and add an image entry here with descriptive alt text. Keep one screenshot per workflow so the photo's purpose is clear.
+<img width="3840" height="2160" alt="6970d58f2e0d419395f96ee3aab8494d" src="https://github.com/user-attachments/assets/dbe2ecc0-7f42-4397-b61a-5c257a632ec5" />
 
-<img width="1024" alt="Following feed with the Snipe Feed tab and score rows" src="ingame.jpg" />
 
-<img width="1024" alt="Following feed showing multiple players" src="ingame2.jpg" />
-
-<img width="1024" alt="Following feed beside the recently played song panel" src="ingame3.jpg" />
-
-<img width="1024" alt="Scrolled Following feed with score rows and map indicators" src="ingame4.jpg" />
-
-<img width="1024" alt="Score details modal with the Play action" src="ingame5.jpg" />
-
-<img width="1024" alt="Following feed showing the draggable side scrollbar and rating tiers" src="ingame6.jpg" />
+<img width="3840" height="2160" alt="915e0a83408e430386ea61d8ac17cca7" src="https://github.com/user-attachments/assets/80392e62-a826-49ed-a03b-92fd119c0e15" />
 
 ## Two versions, one repo
 | Platform | Source | Download |

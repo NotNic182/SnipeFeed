@@ -45,6 +45,8 @@ target_include_directories(${COMPILE_ID} PUBLIC ${SHARED_DIR})
 target_include_directories(${COMPILE_ID} PRIVATE ${INCLUDE_DIR}/zip/src)
 
 target_link_libraries(${COMPILE_ID} PRIVATE -llog -lz)
+# Keep the statically linked curl/OpenSSL symbols private to this mod.
+target_link_options(${COMPILE_ID} PRIVATE -Wl,--exclude-libs,libcurl.a)
 # add extern stuff like libs and other includes
 include(extern.cmake)
 

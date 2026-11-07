@@ -97,16 +97,16 @@ qpm s qmod       # packages SnipeFeed.qmod
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
 
-## Map style and rating tiers
+## Map style and skill triangle
 
 Each score row reserves a compact BeatLeader map indicator at the right edge. It uses only fields already included in that score's `leaderboard.difficulty` object, so it adds no requests and no image-cache entries.
 
 | BeatLeader data on the score | What SnipeFeed shows |
 |---|---|
-| `passRating`, `accRating`, and `techRating` are all numeric | Three plain colored tiers show the exact **Pass**, **Acc**, and **Tech** values. The detail modal shows the same values. |
+| `passRating`, `accRating`, and `techRating` are all numeric | A BeatLeader-style skill triangle (Tech top-left, Acc top-right, Pass bottom, out of 15). The detail modal shows a bigger one plus the exact values. |
 | No complete rating triple, but `type`, `styleTags`, or `speedTags` has a known bit | The authoritative style label is shown (for example **Speed**, **Midspeed**, **Acc**, **Tech**, **Linear**, or **Stream**). |
 | No complete rating triple and no recognized style metadata | The row shows the real difficulty status when available, otherwise **ratings unavailable**. The detail modal says the BeatLeader rating graph is unavailable. SnipeFeed does not infer a style or rating. |
-| Ranked map | Normally receives the three rating fields and therefore gets the exact tiers; its detail line says **Ranked**. If BeatLeader omits any field, SnipeFeed degrades to the label/unavailable rules above. |
+| Ranked map | Normally receives the three rating fields and therefore gets the triangle; its detail line says **Ranked**. If BeatLeader omits any field, SnipeFeed degrades to the label/unavailable rules above. |
 | Unranked or non-graphed map | Its detail line says **Unranked** when the status is present. It can still show an explicit BeatLeader type/tag, but never a fabricated rating or accuracy estimate. |
 
 Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed appear only when BeatLeader explicitly supplies those map-type bits.
@@ -114,7 +114,8 @@ Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed
 ## v3.4.0
 
 - Updated for 1.45.3 (bs-hook 9.4.3, custom-types 0.21.2, BSML 0.6.5, SongCore 1.3.5, config-utils 3.0.0 + reflect-cpp). Your config and BeatLeader login carry over.
-- My Profile sorting redone: 15 sorts with a direction toggle, rows show the sorted stat, the score popup shows mistakes/pauses/streak/plays/watched and the pp split.
+- My Profile sorting redone: 15 sorts with a direction toggle, rows show the sorted stat, the score popup shows mistakes/pauses/streak/plays/watched.
+- Skill triangle on every rated map, like BeatLeader's.
 
 ## Quest v3.3.2 features
 
@@ -160,7 +161,7 @@ Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed
 
 1. Install the qmod on Beat Saber `1.45.3_30054`, restart the game, and open **Mods → Snipe Feed** in Solo.
 2. Confirm **Following** still loads, filters by player, opens score details, and leaves installed/download actions unchanged.
-3. Find one ranked/graphed score and verify its colored Pass/Acc/Tech tiers match the exact values in the detail modal.
+3. Find one ranked/graphed score and check its triangle leans the same way as the Pass/Acc/Tech values in the detail modal.
 4. Check an unranked or non-graphed score: verify an explicit BeatLeader style/status is shown when present, otherwise `ratings unavailable` / graph unavailable appears; no rating or accuracy estimate should be fabricated.
 5. Drag the side scrollbar and use the thumbstick; verify both scroll the list, the handle tracks the position, and no stock top/bottom caret remains. Scroll enough to recycle rows, then scroll back and confirm neither rating/style text, cover, nor avatar leaks from a previously bound score.
 6. Open **My Profile**. Confirm the logged-in BeatLeader account is shown (or the configured `PlayerId` fallback), then go through the sorts and both directions: each row's highlighted value should follow the order, PP/Stars sorts should only show ranked maps, and unranked scores shouldn't show a fake star value.

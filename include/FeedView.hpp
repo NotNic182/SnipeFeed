@@ -40,6 +40,7 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, orderButtonText);
     DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalCover);
     DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalAvatar);
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalTriangle);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, modalPlayerText);
     DECLARE_INSTANCE_FIELD(StringW, modalPendingCover);
     DECLARE_INSTANCE_FIELD(StringW, modalPendingAvatar);

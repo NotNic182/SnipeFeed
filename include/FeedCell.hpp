@@ -33,12 +33,9 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, playerText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, timeText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, statsText);
-    // Three per-axis rating tiers as plain colored text — "Pass <n>", "Acc
-    // <n>", "Tech <n>" (green/blue/red). Text-only after the triangle and the
-    // energy-bar graphic both failed on-device; no images, no geometry.
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, passLabel);
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, accLabel);
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, techLabel);
+    // BeatLeader-style Pass/Acc/Tech triangle (SkillTriangle.hpp), a plain
+    // sprite drawn on the CPU; hidden for maps without ratings.
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, triangleImage);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, styleText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, chevronText);
 

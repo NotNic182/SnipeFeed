@@ -2,8 +2,8 @@
 #include "Web.hpp"
 #include "main.hpp"
 
-#include "beatsaber-hook/shared/config/rapidjson-utils.hpp"
-#include "beatsaber-hook/shared/config/config-utils.hpp"
+#include "beatsaber-hook/shared/rapidjson.hpp"
+#include "beatsaber-hook/shared/utils.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -190,7 +190,7 @@ namespace SnipeFeed {
     // login cookies. Both mods run inside the same game process, so if the
     // player is logged in there we can reuse the session read-only.
     static std::string BeatLeaderCookieFile() {
-        return getDataDir("bl") + "cookies/cookies.txt";
+        return get_data_dir("bl") + "cookies/cookies.txt";
     }
 
     enum class FriendFeedOutcome {

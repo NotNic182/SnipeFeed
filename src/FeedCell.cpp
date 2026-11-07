@@ -107,7 +107,7 @@ void FeedCell::SetData(FeedEntry const& entry, int rank) {
     pendingCoverUrl = entry.coverUrl;
     pendingAvatarUrl = entry.avatarUrl;
 
-    SafePtrUnity<FeedCell> self(this);
+    safe_ptr<FeedCell*, true> self(this);
     if (!entry.coverUrl.empty()) {
         SpriteCache::GetSprite(entry.coverUrl, [self, url = entry.coverUrl](UnityEngine::Sprite* sprite) {
             if (!self || !self->pendingCoverUrl || static_cast<std::string>(self->pendingCoverUrl) != url) return;

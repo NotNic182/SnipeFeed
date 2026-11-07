@@ -2,7 +2,7 @@
 #include "Web.hpp"
 #include "main.hpp"
 
-#include "beatsaber-hook/shared/config/rapidjson-utils.hpp"
+#include "beatsaber-hook/shared/rapidjson.hpp"
 
 #include "songcore/shared/SongCore.hpp"
 
@@ -246,7 +246,9 @@ namespace SnipeFeed::Installer {
 
         auto customLevelsPack = SongCore::API::Loading::GetCustomLevelPack();
         if (customLevelsPack == nullptr) return false;
-        if (customLevelsPack->_beatmapLevels->get_Length() == 0) return false;
+        // ArrayW (bs-hook 9): null-check the wrapper before size().
+        auto levels = customLevelsPack->_beatmapLevels;
+        if (!levels || levels.empty()) return false;
 
         auto levelCategory = System::Nullable_1<SelectLevelCategoryViewController::LevelCategory>();
         levelCategory.value = SelectLevelCategoryViewController::LevelCategory(SelectLevelCategoryViewController::LevelCategory::All);
@@ -265,7 +267,7 @@ namespace SnipeFeed::Installer {
     }
 
     bool PressSoloButton() {
-        SafePtrUnity<UnityEngine::GameObject> songSelectButton = UnityEngine::GameObject::Find("SoloButton").unsafePtr();
+        safe_ptr<UnityEngine::GameObject*, true> songSelectButton = UnityEngine::GameObject::Find("SoloButton").unsafe_ptr();
         if (!songSelectButton)
             songSelectButton = UnityEngine::GameObject::Find("Wrapper/BeatmapWithModifiers/BeatmapSelection/EditButton");
         if (!songSelectButton) {

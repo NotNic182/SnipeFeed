@@ -72,10 +72,13 @@ namespace {
         // wrong here: it is a raw pointer whose alive-check DEREFERENCES that
         // pointer, and stored in native memory it neither keeps the object
         // alive nor nulls when the GC collects it — a use-after-free on
-        // every async completion. SafePtrUnity holds a GC handle (memory
-        // stays valid) and its bool checks m_CachedPtr on live memory, so it
-        // correctly reports Unity destruction. Main thread only.
-        SafePtrUnity<SnipeFeed::FeedView> activeView;
+        // every async completion. safe_ptr (beatsaber-hook 9's replacement
+        // for SafePtrUnity) holds a GC handle (memory stays valid) and, with
+        // its Unity flag set, its bool checks m_CachedPtr on live memory, so
+        // it correctly reports Unity destruction. The flag is passed
+        // explicitly rather than inferred from the type so the alive-check
+        // can never silently drop out. Main thread only.
+        safe_ptr<SnipeFeed::FeedView*, true> activeView;
     };
     FeedState state;
 
@@ -108,7 +111,7 @@ namespace {
     }
 
     // The live view to deliver deferred results to, or nullptr. Main thread
-    // only — resolving a SafePtr is a GC-handle read.
+    // only — resolving a safe_ptr is a GC-handle read.
     SnipeFeed::FeedView* ActiveViewAlive() {
         return state.activeView ? state.activeView.ptr() : nullptr;
     }
@@ -134,7 +137,7 @@ namespace {
     bool IsSoloFlowOnTop() {
         auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
         HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
-        return youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
+        return youngest && i2c::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator*>(youngest) != nullptr;
     }
 
     GlobalNamespace::LevelCollectionNavigationController* ActivePicker() {
@@ -156,15 +159,15 @@ void FeedView::RebuildFilter() {
     // its modal blocker and can eat all menu input until a scene change.
     // _modalView is declared on DropdownWithTableView (SimpleTextDropdown's
     // base class) in the installed headers, typed UnityW<HMUI::ModalViewBase>
-    // — a UnityW (so .unsafePtr() applies), but the BASE class, and _isShown
+    // — a UnityW (so .unsafe_ptr() applies), but the BASE class, and _isShown
     // is only declared on the derived HMUI::ModalView. A checked cast (same
-    // il2cpp_utils::try_cast idiom as IsSoloFlowOnTop above) bridges that
-    // instead of the brief's direct pointer.
+    // i2c::try_cast idiom as IsSoloFlowOnTop above, nullptr on mismatch)
+    // bridges that instead of the brief's direct pointer.
     if (auto* dropdown = filterContainer->GetComponentInChildren<HMUI::SimpleTextDropdown*>()) {
-        if (auto* modalBase = dropdown->_modalView.unsafePtr()) {
-            auto modal = il2cpp_utils::try_cast<HMUI::ModalView>(modalBase);
-            if (modal.has_value() && (*modal)->_isShown)
-                (*modal)->Hide(false, nullptr);
+        if (auto* modalBase = dropdown->_modalView.unsafe_ptr()) {
+            auto* modal = i2c::try_cast<HMUI::ModalView*>(modalBase);
+            if (modal && modal->_isShown)
+                modal->Hide(false, nullptr);
         }
     }
 
@@ -298,9 +301,9 @@ void FeedView::OnCellClicked(int listIdx) {
         modalAvatar->set_color(FeedCell::PlaceholderTint());
     }
     // SpriteCache callbacks are created, stored, invoked and destroyed on
-    // the main thread only, so a SafePtrUnity capture is legal here and
-    // both roots the view and reports its destruction.
-    SafePtrUnity<FeedView> safeSelf(this);
+    // the main thread only, so a safe_ptr capture is legal here and both
+    // roots the view and reports its destruction.
+    safe_ptr<FeedView*, true> safeSelf(this);
     if (!e.coverUrl.empty()) {
         SpriteCache::GetSprite(e.coverUrl, [safeSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
             if (!safeSelf || !safeSelf->modalCover) return;
@@ -407,7 +410,7 @@ void FeedView::PlaySelected() {
     if (playButtonText) playButtonText->set_text("Downloading...");
 
     // This callback crosses the installer's non-attached worker thread —
-    // constructing/copying/destroying a SafePtr there is not legal (GC
+    // constructing/copying/destroying a safe_ptr there is not legal (GC
     // handle ops need an attached thread), so it captures only plain data
     // and resolves the live view on the main thread via state.activeView.
     Installer::DownloadAndInstallAsync(entry.songHash, [entry](bool success, std::string error) {
@@ -876,11 +879,10 @@ void FeedView::BuildUI() {
 void FeedView::OnDestroy() {
     // Un-pin the GC root when the pinned view is the one being destroyed;
     // a dead view must not stay rooted until the next activation.
-    // state.activeView = SafePtrUnity<FeedView>() is not legal here either
-    // (same deleted operator= as DidActivate) — clear() is the equivalent
-    // reset to empty. The bool check guards ptr(): SafePtrUnity::ptr()
-    // throws/crashes on an empty or already-dead handle rather than
-    // returning nullptr, and a FeedView destroyed before ever being
+    // clear() (not assignment from an empty safe_ptr) is the reset: it is
+    // the path that frees the GC-fixed handle (see DidActivate). The bool
+    // check guards ptr(): safe_ptr::ptr() throws on an empty handle rather
+    // than returning nullptr, and a FeedView destroyed before ever being
     // activated leaves state.activeView empty.
     if (state.activeView && state.activeView.ptr() == this)
         state.activeView.clear();
@@ -896,7 +898,7 @@ void FeedView::DidActivate(bool firstActivation) {
             height = rect->get_rect().get_height();
         if (height <= 30.0f && buildAttempts < 5) {
             buildAttempts++;
-            SafePtrUnity<FeedView> safeSelf(this);
+            safe_ptr<FeedView*, true> safeSelf(this);
             BSML::MainThreadScheduler::Schedule([safeSelf]() mutable {
                 if (safeSelf) safeSelf->DidActivate(false);
             });
@@ -907,12 +909,10 @@ void FeedView::DidActivate(bool firstActivation) {
 
     // In-flight fetch results and progress land on the most recently
     // activated view — that's us now.
-    // SafePtrUnity's copy-assignment is implicitly deleted (it declares a
-    // move constructor, which per [class.copy.assign] suppresses the
-    // implicit copy-assign operator), and the only other operator= overloads
-    // take T*/T& by IMPLICIT conversion — SafePtrUnity's operator T* is
-    // explicit, so it can't satisfy them either. emplace() performs the
-    // equivalent rooting without going through operator=.
+    // emplace() rather than operator=: beatsaber-hook 9's safe_ptr copy-
+    // assignment only re-points the shared refcounted handle, while
+    // emplace() goes through clear(), which GC-frees the previous handle
+    // once nothing else references it.
     state.activeView.emplace(this);
 
     // Defensive: if a hide was ever interrupted (menu hop, tab switch),

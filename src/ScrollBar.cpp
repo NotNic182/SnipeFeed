@@ -43,7 +43,7 @@ void FeedScrollBar::ScrollToPointer(UnityEngine::EventSystems::PointerEventData*
     UnityEngine::Camera* cam = eventData->pressEventCamera ? eventData->pressEventCamera.ptr() : nullptr;
     UnityEngine::Vector2 local{};
     if (!UnityEngine::RectTransformUtility::ScreenPointToLocalPointInRectangle(
-            trackRect, eventData->position, cam, byref(local)))
+            trackRect, eventData->position, cam, local))
         return;
     auto rect = trackRect->get_rect();
     float height = rect.get_height();

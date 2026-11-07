@@ -19,7 +19,7 @@ namespace SnipeFeed::SpriteCache {
     namespace {
         // Every container below is read and written on the main thread only;
         // the download thread hands its result back via MainThreadScheduler.
-        std::unordered_map<std::string, SafePtrUnity<UnityEngine::Sprite>> cache;
+        std::unordered_map<std::string, safe_ptr<UnityEngine::Sprite*, true>> cache;
         std::unordered_set<std::string> failed;
         std::unordered_map<std::string, std::vector<std::function<void(UnityEngine::Sprite*)>>> pending;
 

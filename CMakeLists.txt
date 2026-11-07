@@ -10,13 +10,16 @@ cmake_minimum_required(VERSION 3.21)
 project(${COMPILE_ID})
 
 # c++ standard
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED 20)
+# beatsaber-hook 9 (1.45.x) uses std::expected, so C++23 is the minimum.
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED 23)
 
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_compile_options(-frtti -fexceptions)
+# paper2's backtrace header uses a VLA; BSML/SongCore silence it the same way.
+add_compile_options(-Wno-vla-cxx-extension)
 add_compile_options(-O3)
 add_compile_definitions(VERSION=\"${MOD_VERSION}\")
 add_compile_definitions(MOD_ID=\"${MOD_ID}\")

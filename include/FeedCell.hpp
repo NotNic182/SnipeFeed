@@ -1,5 +1,9 @@
 #pragma once
 
+// First: beatsaber-hook 9's utils.hpp needs scotland2's modloader types
+// declared before any cordl/custom-types header pulls it in.
+#include "main.hpp"
+
 #include "Feed.hpp"
 
 #include "custom-types/shared/macros.hpp"

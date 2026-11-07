@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace SnipeFeed {
@@ -20,6 +21,12 @@ namespace SnipeFeed {
         float accuracy = 0.0f;
         float pp = 0.0f;
         float stars = 0.0f;
+        // What BeatLeader's Stars sort uses: the speed-modifier stars
+        // (SS/FS/SF) times 1 + the other modifiers' values, so No Fail
+        // counts as 0 and Small Cubes as half. Same as `stars` with no
+        // modifiers. starModifiers lists the ones that changed it ("FS+SC").
+        float effectiveStars = 0.0f;
+        std::string starModifiers;
         // BeatLeader's leaderboard.difficulty ratings. `hasRatings` is
         // separate because the API uses null for maps that have not been
         // graphed/rated; treating null as 0 would invent a triangle.
@@ -38,7 +45,31 @@ namespace SnipeFeed {
         int mapStatus = -1;
         long long timepost = 0;
         bool fullCombo = false;
+        // Per-score stats behind the profile sorts. -1 = not in the payload,
+        // so nothing ever shows a made-up 0.
+        float accPP = -1.0f;
+        float passPP = -1.0f;
+        float techPP = -1.0f;
+        long long score = -1;   // modifiedScore
+        int placement = -1;     // rank on the map's leaderboard
+        int playCount = -1;
+        int pauses = -1;
+        int maxStreak = -1;
+        int mistakes = -1;      // missed + bad cuts + bomb cuts + walls
+        int replaysWatched = -1;
+        int nominations = -1;   // score of the week nominations
     };
+
+    // True if a BeatLeader modifier list ("FS,BE") contains `modifier`.
+    inline bool HasModifier(std::string_view modifiers, std::string_view modifier) {
+        while (!modifiers.empty()) {
+            auto comma = modifiers.find(',');
+            if (modifiers.substr(0, comma) == modifier) return true;
+            if (comma == std::string_view::npos) break;
+            modifiers.remove_prefix(comma + 1);
+        }
+        return false;
+    }
 
     // On success with ZERO entries, `error` carries a user-facing info
     // message ("you don't follow anyone yet") — it is not a failure and
@@ -85,13 +116,14 @@ namespace SnipeFeed {
         std::function<void(std::string)> onProgress,
         std::function<void(FeedResult)> onDone);
 
-    // Loads the configured player's public profile and one bounded page of
-    // scores. BeatLeader performs the requested ordering server-side.
+    // Loads your profile (BeatLeader mod login first, configured PlayerId as
+    // the fallback) and one page of scores. `scoresQuery` comes from
+    // ProfileSort::Query; BeatLeader does the ordering server-side. When the
+    // login was used, the scores request sends it too.
     // Callbacks run on the worker thread, just like FetchFeedAsync.
     void FetchProfileAsync(
         std::string playerInput,
-        std::string sortBy,
-        std::string order,
+        std::string scoresQuery,
         int count,
         std::function<void(std::string)> onProgress,
         std::function<void(ProfileResult)> onDone);

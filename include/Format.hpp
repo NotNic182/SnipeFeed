@@ -8,7 +8,9 @@
 #include <format>
 #include <initializer_list>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 // Text formatting shared by the feed cells and the detail modal.
 // Difficulty colors match the official BeatLeader mod; stat colors are
@@ -151,6 +153,65 @@ namespace SnipeFeed::Format {
         if (e.fullCombo) line += "  <color=#57FF8A>FC</color>";
         if (!e.modifiers.empty()) line += "  <color=#999999>+" + Escape(e.modifiers) + "</color>";
         return line;
+    }
+
+    inline std::string Thousands(long long value) {
+        std::string digits = std::to_string(value);
+        std::string out;
+        int lead = static_cast<int>(digits.size()) % 3;
+        for (int i = 0; i < static_cast<int>(digits.size()); i++) {
+            if (i > 0 && (i - lead) % 3 == 0) out += ',';
+            out += digits[i];
+        }
+        return out;
+    }
+
+    inline std::string Count(long long n, char const* singular, char const* plural) {
+        return Thousands(n) + " " + (n == 1 ? singular : plural);
+    }
+
+    // What a profile row is sorted by, when the row doesn't already show it
+    // (date, pp, acc and stars are always on the row). Empty if the score
+    // didn't come with that stat.
+    inline std::string SortValue(FeedEntry const& e, std::string_view sortBy) {
+        std::string text;
+        if (sortBy == "accPP" && e.accPP >= 0.0f) text = std::format("{:.0f}pp acc", e.accPP);
+        else if (sortBy == "passPP" && e.passPP >= 0.0f) text = std::format("{:.0f}pp pass", e.passPP);
+        else if (sortBy == "techPP" && e.techPP >= 0.0f) text = std::format("{:.0f}pp tech", e.techPP);
+        else if (sortBy == "scoreValue" && e.score >= 0) text = Thousands(e.score);
+        else if (sortBy == "rank" && e.placement > 0) text = "#" + Thousands(e.placement);
+        else if (sortBy == "playCount" && e.playCount >= 0) text = Count(e.playCount, "play", "plays");
+        else if (sortBy == "pauses" && e.pauses >= 0) text = Count(e.pauses, "pause", "pauses");
+        else if (sortBy == "maxStreak" && e.maxStreak >= 0) text = "streak " + Thousands(e.maxStreak);
+        else if (sortBy == "sotwNominations" && e.nominations >= 0) text = Count(e.nominations, "nomination", "nominations");
+        else if (sortBy == "replaysWatched" && e.replaysWatched >= 0) text = Thousands(e.replaysWatched) + " watched";
+        else if (sortBy == "mistakes" && e.mistakes >= 0) text = Count(e.mistakes, "mistake", "mistakes");
+        // The title shows the map's stars; BeatLeader sorts by the
+        // modifier-adjusted value, so show that when modifiers moved it.
+        else if (sortBy == "stars" && !e.starModifiers.empty())
+            text = std::format("{:.2f}★ with {}", e.effectiveStars, Escape(e.starModifiers));
+        return text.empty() ? "" : "<color=#FFD27A>" + text + "</color>";
+    }
+
+    // One small line of extra score stats for the detail modal.
+    inline std::string ExtraStatsLine(FeedEntry const& e) {
+        std::vector<std::string> parts;
+        if (e.placement > 0) parts.push_back("#" + Thousands(e.placement) + " on map");
+        if (e.mistakes >= 0) parts.push_back(Count(e.mistakes, "mistake", "mistakes"));
+        if (e.pauses >= 0) parts.push_back(Count(e.pauses, "pause", "pauses"));
+        if (e.maxStreak >= 0) parts.push_back("streak " + Thousands(e.maxStreak));
+        if (e.playCount > 0) parts.push_back(Count(e.playCount, "play", "plays"));
+        if (e.replaysWatched > 0) parts.push_back(Thousands(e.replaysWatched) + " watched");
+        if (e.nominations > 0) parts.push_back(Count(e.nominations, "nomination", "nominations"));
+        if (e.pp > 0.0f && e.accPP >= 0.0f && e.passPP >= 0.0f && e.techPP >= 0.0f)
+            parts.push_back(std::format("{:.0f} acc / {:.0f} pass / {:.0f} tech pp", e.accPP, e.passPP, e.techPP));
+        if (parts.empty()) return "";
+        std::string line;
+        for (auto const& part : parts) {
+            if (!line.empty()) line += "  •  ";
+            line += part;
+        }
+        return "<size=70%><color=#AABBCC>" + line + "</color></size>";
     }
 
     // The feed cell's top row: "Song Name - Artist [mapper]" with small

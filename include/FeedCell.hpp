@@ -56,7 +56,9 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     static UnityEngine::Color LoadedTint() { return {1.0f, 1.0f, 1.0f, 1.0f}; }
 
     static FeedCell* GetCell(HMUI::TableView* tableView);
-    void SetData(SnipeFeed::FeedEntry const& entry, int rank);
+    // sortValue: what a profile row is sorted by (Format::SortValue), shown
+    // before the time; empty on the following feed.
+    void SetData(SnipeFeed::FeedEntry const& entry, int rank, std::string const& sortValue = "");
 
    private:
     void RefreshBackground();

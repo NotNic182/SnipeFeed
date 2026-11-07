@@ -46,7 +46,7 @@ Both versions share the same v2.0.0 feature set and UI: the Snipe Feed tab in ev
 
 The tab appears in the gameplay setup panel (left screen) in **every** mode — Solo/Party song selection, online multiplayer, campaign, and modded flows like **Multiplayer+** (QBeatSaberPlus) lobbies. Open the **Mods** tab on that panel and pick **Snipe Feed**.
 
-Inside Snipe Feed, use **Following** for the friends feed or **My Profile** for your BeatLeader summary and score history. My Profile shows PP, global/country rank, ranked average accuracy, and a bounded score list. Its dropdown asks BeatLeader to order the list by newest, stars high/low, or accuracy best/worst; the existing **Scores** stepper controls the page size (10–100).
+Inside Snipe Feed, use **Following** for the friends feed or **My Profile** for your BeatLeader summary and score history. My Profile shows PP, global/country rank, ranked average accuracy, and a bounded score list. Sort it by Date, PP, Acc PP, Pass PP, Tech PP, Acc, Score, Rank, Stars, Plays, Pauses, Streak, Nominations, Watched or Mistakes, and flip the direction with the button next to **My Profile**. Each row shows the stat it's sorted by. PP and Stars sorts only count ranked maps. Stars sorts the way BeatLeader does, with modifiers applied (NF counts as 0★), and the row says when a modifier moved it. The **Scores** stepper sets how many load (10–100).
 
 ## What the Play button does (per mode)
 
@@ -92,7 +92,7 @@ qpm s qmod       # packages SnipeFeed.qmod
 ## How it works
 
 1. If the official BeatLeader mod's login cookie exists on the headset (`ModData/.../Mods/bl/cookies/cookies.txt`), one call to `GET api.beatleader.com/user/friendScores?sortBy=date&order=desc` returns the same feed the BeatLeader website home page shows. The cookie is read-only reused, never modified or logged.
-2. **My Profile** resolves the headset login through the same `GET /user/modinterface` endpoint used by the official Quest mod, falling back to the configured `PlayerId`. It then reads `GET /player/{id}/scores` with BeatLeader's documented `sortBy`, `order`, `page`, and `count` parameters.
+2. **My Profile** resolves the headset login through the same `GET /user/modinterface` endpoint used by the official Quest mod, falling back to the configured `PlayerId`. It then reads `GET /player/{id}/scores` with `sortBy`, `order`, `page` and `count` (plus `type=ranked` for the PP/Stars sorts), sending the BeatLeader login when that's what found your profile.
 3. Entries are rendered with player, accuracy, PP, FC flag, song, difficulty, stars, modifiers, and time ago. Missing/unranked star data is simply omitted.
 
 All requests run on a background thread with 15s timeouts; UI updates go through BSML's main-thread scheduler. If the network is down or the ID is wrong, the view shows an error message and the game is unaffected.
@@ -114,6 +114,7 @@ Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed
 ## v3.4.0
 
 - Updated for 1.45.3 (bs-hook 9.4.3, custom-types 0.21.2, BSML 0.6.5, SongCore 1.3.5, config-utils 3.0.0 + reflect-cpp). Your config and BeatLeader login carry over.
+- My Profile sorting redone: 15 sorts with a direction toggle, rows show the sorted stat, the score popup shows mistakes/pauses/streak/plays/watched and the pp split.
 
 ## Quest v3.3.2 features
 
@@ -162,7 +163,7 @@ Pass is BeatLeader's pass rating, not a guessed speed rating. Speed and midspeed
 3. Find one ranked/graphed score and verify its colored Pass/Acc/Tech tiers match the exact values in the detail modal.
 4. Check an unranked or non-graphed score: verify an explicit BeatLeader style/status is shown when present, otherwise `ratings unavailable` / graph unavailable appears; no rating or accuracy estimate should be fabricated.
 5. Drag the side scrollbar and use the thumbstick; verify both scroll the list, the handle tracks the position, and no stock top/bottom caret remains. Scroll enough to recycle rows, then scroll back and confirm neither rating/style text, cover, nor avatar leaks from a previously bound score.
-6. Open **My Profile**. Confirm the logged-in BeatLeader account is shown (or the configured `PlayerId` fallback), then test all five order choices and verify unranked scores do not show a fake star value.
+6. Open **My Profile**. Confirm the logged-in BeatLeader account is shown (or the configured `PlayerId` fallback), then go through the sorts and both directions: each row's highlighted value should follow the order, PP/Stars sorts should only show ranked maps, and unranked scores shouldn't show a fake star value.
 7. Toggle between both views during a refresh, reopen the tab within two minutes to exercise the cache, and test an offline refresh plus an empty/invalid `PlayerId` without a BeatLeader login.
 8. In Solo, a Party picker, and a multiplayer lobby, open a profile score and verify the button respectively re-enters/selects, selects in place, or remains download-only.
 

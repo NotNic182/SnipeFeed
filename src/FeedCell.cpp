@@ -91,7 +91,7 @@ FeedCell* FeedCell::GetCell(HMUI::TableView* tableView) {
     return tableCell.cast<FeedCell>();
 }
 
-void FeedCell::SetData(FeedEntry const& entry, int rank) {
+void FeedCell::SetData(FeedEntry const& entry, int rank, std::string const& sortValue) {
     if (rank <= 3)
         rankText->set_text(std::format("<b><color={}>{}</color></b>", RankColor(rank), rank));
     else
@@ -99,7 +99,8 @@ void FeedCell::SetData(FeedEntry const& entry, int rank) {
     songText->set_text(Format::TitleLine(entry));
     playerText->set_text("<b>" + Format::Escape(entry.playerName) + "</b>");
     statsText->set_text(Format::StatsLine(entry));
-    timeText->set_text(Format::TimeAgo(entry.timepost));
+    std::string timeAgo = Format::TimeAgo(entry.timepost);
+    timeText->set_text(sortValue.empty() ? timeAgo : sortValue + (timeAgo.empty() ? "" : "  " + timeAgo));
     UpdateSkillDisplay(entry);
 
     ResetImages();

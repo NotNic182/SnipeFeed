@@ -56,6 +56,15 @@ namespace SnipeFeed {
         return fallback;
     }
 
+    // -1 when the key is missing or not a non-negative integer.
+    static long long GetOptionalCount(rapidjson::Value const& obj, char const* key) {
+        auto it = obj.FindMember(key);
+        if (it == obj.MemberEnd() || !it->value.IsNumber()) return -1;
+        double value = it->value.GetDouble();
+        if (!std::isfinite(value) || value < 0.0) return -1;
+        return static_cast<long long>(value);
+    }
+
     // Swagger permits both enum names and integer values; live score payloads
     // currently use the integer bitmask/status representation.
     static int GetMapTypeMask(rapidjson::Value const& difficulty) {
@@ -110,6 +119,57 @@ namespace SnipeFeed {
         return 0;
     }
 
+    // Matches BeatLeader's Stars sort (checked against live sort order).
+    static void ParseEffectiveStars(rapidjson::Value const& difficulty, FeedEntry& entry) {
+        float stars = entry.stars;
+        std::string changed;
+        auto addChanged = [&](std::string_view modifier) {
+            if (!changed.empty()) changed += "+";
+            changed += modifier;
+        };
+
+        char const* speedModifier = nullptr;
+        auto ratings = difficulty.FindMember("modifiersRating");
+        if (ratings != difficulty.MemberEnd() && ratings->value.IsObject()) {
+            for (auto [modifier, key] : {std::pair{"SF", "sfStars"}, std::pair{"FS", "fsStars"}, std::pair{"SS", "ssStars"}}) {
+                if (!HasModifier(entry.modifiers, modifier)) continue;
+                float speedStars = 0.0f;
+                if (GetOptionalFloat(ratings->value, key, speedStars) && speedStars > 0.0f) {
+                    stars = speedStars;
+                    speedModifier = modifier;
+                    addChanged(modifier);
+                }
+                break;
+            }
+        }
+
+        float factor = 1.0f;
+        auto values = difficulty.FindMember("modifierValues");
+        bool haveValues = values != difficulty.MemberEnd() && values->value.IsObject();
+        std::string_view mods = entry.modifiers;
+        while (!mods.empty()) {
+            auto comma = mods.find(',');
+            std::string_view modifier = mods.substr(0, comma);
+            mods = comma == std::string_view::npos ? std::string_view() : mods.substr(comma + 1);
+            if (modifier.empty() || (speedModifier && modifier == speedModifier)) continue;
+            std::string key(modifier);
+            std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) { return std::tolower(c); });
+            double value = 0.0;
+            if (haveValues) {
+                auto it = values->value.FindMember(key.c_str());
+                if (it != values->value.MemberEnd() && it->value.IsNumber()) value = it->value.GetDouble();
+            } else if (modifier == "NF") {
+                value = -1.0;
+            }
+            if (value != 0.0 && std::isfinite(value)) {
+                factor += static_cast<float>(value);
+                addChanged(modifier);
+            }
+        }
+        entry.effectiveStars = std::max(0.0f, stars * factor);
+        entry.starModifiers = std::move(changed);
+    }
+
     // Parses one score object (shape shared by /player/{id}/scores and
     // /user/friendScores). Player identity comes from the score's own
     // "player" object when present, otherwise from the fallback.
@@ -135,6 +195,25 @@ namespace SnipeFeed {
         entry.timepost = GetScoreTime(score);
         entry.fullCombo = score.HasMember("fullCombo") && score["fullCombo"].IsBool() && score["fullCombo"].GetBool();
 
+        GetOptionalFloat(score, "accPP", entry.accPP);
+        GetOptionalFloat(score, "passPP", entry.passPP);
+        GetOptionalFloat(score, "techPP", entry.techPP);
+        entry.score = GetOptionalCount(score, "modifiedScore");
+        auto asInt = [](long long v) { return static_cast<int>(std::min<long long>(v, INT_MAX)); };
+        entry.placement = asInt(GetOptionalCount(score, "rank"));
+        entry.playCount = asInt(GetOptionalCount(score, "playCount"));
+        entry.pauses = asInt(GetOptionalCount(score, "pauses"));
+        entry.maxStreak = asInt(GetOptionalCount(score, "maxStreak"));
+        entry.replaysWatched = asInt(GetOptionalCount(score, "replaysWatched"));
+        entry.nominations = asInt(GetOptionalCount(score, "sotwNominations"));
+        // Same definition BeatLeader sorts "mistakes" by.
+        long long mistakes = -1;
+        for (auto key : {"missedNotes", "badCuts", "bombCuts", "wallsHit"}) {
+            long long part = GetOptionalCount(score, key);
+            if (part >= 0) mistakes = std::max(mistakes, 0LL) + part;
+        }
+        entry.mistakes = asInt(mistakes);
+
         auto lb = score.FindMember("leaderboard");
         if (lb != score.MemberEnd() && lb->value.IsObject()) {
             auto song = lb->value.FindMember("song");
@@ -149,6 +228,7 @@ namespace SnipeFeed {
             if (diff != lb->value.MemberEnd() && diff->value.IsObject()) {
                 entry.difficulty = GetString(diff->value, "difficultyName");
                 entry.stars = static_cast<float>(GetNumber(diff->value, "stars"));
+                ParseEffectiveStars(diff->value, entry);
                 entry.mapStatus = GetMapStatus(diff->value);
                 entry.mapTypeMask = GetMapTypeMask(diff->value);
                 entry.speedTags = GetInt(diff->value, "speedTags");
@@ -469,15 +549,13 @@ namespace SnipeFeed {
 
     void FetchProfileAsync(
         std::string playerInput,
-        std::string sortBy,
-        std::string order,
+        std::string scoresQuery,
         int count,
         std::function<void(std::string)> onProgress,
         std::function<void(ProfileResult)> onDone) {
 
         count = std::clamp(count, 10, 100);
-        std::thread worker([playerInput = std::move(playerInput), sortBy = std::move(sortBy),
-                            order = std::move(order), count,
+        std::thread worker([playerInput = std::move(playerInput), scoresQuery = std::move(scoresQuery), count,
                             onProgress = std::move(onProgress), onDone = std::move(onDone)] {
             bool doneCalled = false;
             auto finish = [&](ProfileResult result) {
@@ -519,6 +597,10 @@ namespace SnipeFeed {
                 };
 
                 bool haveProfile = false;
+                // Set when the BeatLeader login resolved the profile; the
+                // scores request then goes out logged in too, same as the
+                // following feed.
+                std::string authCookie;
 
                 // Prefer the official Quest mod's authenticated identity so
                 // "My Profile" really means the player logged in on this
@@ -536,6 +618,7 @@ namespace SnipeFeed {
                                              TIMEOUT_SECONDS, authBody, cookieFile);
                     if (authCode == 200 && tryPopulateProfile(authBody)) {
                         haveProfile = true;
+                        authCookie = cookieFile;
                     } else if (authCode == 200) {
                         SnipeFeedLogger.info("Authenticated profile response had no usable player id, falling back to configured PlayerId");
                     } else {
@@ -582,10 +665,9 @@ namespace SnipeFeed {
 
                 if (onProgress) onProgress("Loading your scores...");
                 std::string scoresUrl = std::string(API_URL) + "/player/" + result.profile.id
-                    + "/scores?sortBy=" + sortBy + "&order=" + order
-                    + "&page=1&count=" + std::to_string(count);
+                    + "/scores?" + scoresQuery + "&page=1&count=" + std::to_string(count);
                 std::string scoresBody;
-                long scoresCode = Web::Get(scoresUrl, TIMEOUT_SECONDS, scoresBody);
+                long scoresCode = Web::Get(scoresUrl, TIMEOUT_SECONDS, scoresBody, authCookie);
                 if (scoresCode < 0) {
                     result.error = "Profile loaded, but the scores request failed. Check your connection.";
                     finish(std::move(result));

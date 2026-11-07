@@ -4,6 +4,7 @@
 #include "Format.hpp"
 #include "ScrollBar.hpp"
 #include "ModConfig.hpp"
+#include "ProfileSort.hpp"
 #include "SongInstaller.hpp"
 #include "SpriteCache.hpp"
 #include "main.hpp"
@@ -62,7 +63,8 @@ namespace {
         std::string playerFilter;           // empty = all players
         ProfileSummary profile;
         int profileTotalScores = 0;
-        int profileSort = 0;
+        int profileSort = ProfileSort::DEFAULT;
+        bool profileAscending = false;      // Date (the default) starts newest first
         bool showingProfile = false;
         int selected = -1;
         bool busyPlaying = false;
@@ -81,30 +83,6 @@ namespace {
         safe_ptr<SnipeFeed::FeedView*, true> activeView;
     };
     FeedState state;
-
-    struct ProfileSortOption {
-        char const* label;
-        char const* sortBy;
-        char const* order;
-    };
-    // Server-side orderings on GET /player/{id}/scores. Every sortBy/order
-    // value here is a hardcoded, URL-safe constant confirmed against the
-    // live BeatLeader API (all returned HTTP 200 with correctly-ordered,
-    // populated data). Appended after the original five so existing indices
-    // and the default (index 0 = Newest) are unchanged. Only the My Profile
-    // feed uses these; the Following feed stays newest-first (friendScores).
-    constexpr ProfileSortOption PROFILE_SORTS[] = {
-        {"Newest", "date", "desc"},
-        {"Stars: high to low", "stars", "desc"},
-        {"Stars: low to high", "stars", "asc"},
-        {"Accuracy: best first", "acc", "desc"},
-        {"Accuracy: worst first", "acc", "asc"},
-        {"PP: high to low", "pp", "desc"},
-        {"Oldest first", "date", "asc"},
-        {"Best placement", "rank", "asc"},
-        {"Max streak", "maxStreak", "desc"},
-        {"Most mistakes", "mistakes", "desc"},
-    };
 
     std::vector<FeedEntry>& CurrentEntries() {
         return state.showingProfile ? state.profileEntries : state.feedEntries;
@@ -176,7 +154,7 @@ void FeedView::RebuildFilter() {
 
     state.filterNames.clear();
     if (state.showingProfile) {
-        for (auto const& option : PROFILE_SORTS)
+        for (auto const& option : ProfileSort::OPTIONS)
             state.filterNames.push_back(option.label);
     } else {
         state.filterNames.push_back(FILTER_ALL);
@@ -186,7 +164,7 @@ void FeedView::RebuildFilter() {
     std::vector<std::string_view> views(state.filterNames.begin(), state.filterNames.end());
 
     std::string current = state.showingProfile
-        ? PROFILE_SORTS[state.profileSort].label
+        ? ProfileSort::Get(state.profileSort).label
         : (state.playerFilter.empty() ? FILTER_ALL : state.playerFilter);
 
     auto self = this;
@@ -195,10 +173,12 @@ void FeedView::RebuildFilter() {
     BSML::Lite::CreateDropdown(filterContainer, "", current, views, [self](StringW value) {
         std::string selected = static_cast<std::string>(value);
         if (state.showingProfile) {
-            for (int i = 0; i < static_cast<int>(std::size(PROFILE_SORTS)); i++) {
-                if (selected == PROFILE_SORTS[i].label) {
+            for (int i = 0; i < ProfileSort::COUNT; i++) {
+                if (selected == ProfileSort::OPTIONS[i].label) {
                     if (state.profileSort != i) {
                         state.profileSort = i;
+                        state.profileAscending = ProfileSort::OPTIONS[i].ascendingByDefault;
+                        self->UpdateOrderButton();
                         self->RefreshProfile();
                     }
                     return;
@@ -209,6 +189,14 @@ void FeedView::RebuildFilter() {
             self->RebuildList();
         }
     });
+    UpdateOrderButton();
+}
+
+void FeedView::UpdateOrderButton() {
+    if (!orderButton) return;
+    orderButton->get_gameObject()->SetActive(state.showingProfile);
+    if (orderButtonText)
+        orderButtonText->set_text(ProfileSort::OrderLabel(state.profileSort, state.profileAscending));
 }
 
 void FeedView::RebuildList() {
@@ -235,11 +223,13 @@ void FeedView::RebuildList() {
             std::string countryRank = (!p.country.empty() && p.countryRank > 0)
                 ? std::format(" • {} #{}", Format::Escape(p.country), p.countryRank)
                 : "";
+            auto const& sort = ProfileSort::Get(state.profileSort);
             statusText->set_text(std::format(
-                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} scores • {}",
+                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} {}scores • {}, {}",
                 Format::Escape(p.name), p.pp, p.rank, countryRank,
                 p.averageRankedAccuracy * 100.0f, entries.size(), state.profileTotalScores,
-                PROFILE_SORTS[state.profileSort].label));
+                sort.rankedOnly ? "ranked " : "", sort.label,
+                ProfileSort::OrderLabel(state.profileSort, state.profileAscending)));
         } else if (state.playerFilter.empty()) {
             statusText->set_text(std::format("{} recent scores. Newest first — go snipe!", entries.size()));
         } else {
@@ -250,8 +240,13 @@ void FeedView::RebuildList() {
 
 HMUI::TableCell* FeedView::CellForIdx(HMUI::TableView* tableView, int idx) {
     auto cell = FeedCell::GetCell(tableView);
-    if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
-        cell->SetData(CurrentEntries()[state.visible[idx]], idx + 1);
+    if (idx >= 0 && idx < static_cast<int>(state.visible.size())) {
+        auto const& entry = CurrentEntries()[state.visible[idx]];
+        std::string sortValue = state.showingProfile
+            ? Format::SortValue(entry, ProfileSort::Get(state.profileSort).sortBy)
+            : "";
+        cell->SetData(entry, idx + 1, sortValue);
+    }
     return cell;
 }
 
@@ -283,6 +278,8 @@ void FeedView::OnCellClicked(int listIdx) {
             info += "\n<size=85%>" + diffLine + "</size>";
         }
         info += "\n" + Format::StatsLine(e);
+        if (auto extra = Format::ExtraStatsLine(e); !extra.empty())
+            info += "\n" + extra;
         info += "\n" + Format::MapStyleLine(e);
         info += "\n<size=75%><color=#777777>" + Format::TimeAgo(e.timepost) + "</color></size>";
         detailText->set_text(info);
@@ -564,9 +561,9 @@ void FeedView::RefreshProfile() {
     std::string playerInput = getModConfig().PlayerId.GetValue();
     int count = std::clamp(getModConfig().FeedCount.GetValue(), 10, 100);
     int sortIndex = state.profileSort;
-    auto const sort = PROFILE_SORTS[sortIndex];
+    bool ascending = state.profileAscending;
     FetchProfileAsync(
-        playerInput, sort.sortBy, sort.order, count,
+        playerInput, ProfileSort::Query(sortIndex, ascending), count,
         [generation](std::string progress) {
             BSML::MainThreadScheduler::Schedule([generation, progress = std::move(progress)] {
                 if (generation != state.profileRefreshGeneration.load() || !state.showingProfile) return;
@@ -574,14 +571,14 @@ void FeedView::RefreshProfile() {
                 if (view && view->statusText) view->statusText->set_text(progress);
             });
         },
-        [generation, sortIndex](ProfileResult result) {
+        [generation, sortIndex, ascending](ProfileResult result) {
             state.profileRefreshInFlight.store(false);
-            BSML::MainThreadScheduler::Schedule([generation, sortIndex, result = std::move(result)]() mutable {
+            BSML::MainThreadScheduler::Schedule([generation, sortIndex, ascending, result = std::move(result)]() mutable {
                 if (generation != state.profileRefreshGeneration.load()) return;
                 auto* view = ActiveViewAlive();
-                // A dropdown change while the old request was running must
-                // not label old-order data as the newly selected order.
-                if (sortIndex != state.profileSort) {
+                // A sort or direction change while the old request was
+                // running must not label old-order data as the new order.
+                if (sortIndex != state.profileSort || ascending != state.profileAscending) {
                     if (view && state.showingProfile) view->RefreshProfile();
                     return;
                 }
@@ -691,6 +688,16 @@ void FeedView::BuildUI() {
     navElement->set_preferredWidth(CONTENT_WIDTH);
     BSML::Lite::CreateUIButton(navRow->get_transform(), "Following", [self]() { self->ShowFollowing(); });
     BSML::Lite::CreateUIButton(navRow->get_transform(), "My Profile", [self]() { self->ShowProfile(); });
+    // Sort direction for My Profile; lives up here because the control row
+    // below has no room left next to the sort dropdown. Hidden on Following.
+    // Fixed width so the longest label ("Shortest first") fits.
+    orderButton = BSML::Lite::CreateUIButton(navRow->get_transform(), "", {0.0f, 0.0f}, {28.0f, 0.0f}, [self]() {
+        state.profileAscending = !state.profileAscending;
+        self->UpdateOrderButton();
+        self->RefreshProfile();
+    });
+    orderButtonText = orderButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
+    UpdateOrderButton();
 
     // Single control row: player filter dropdown on the left, scores-to-
     // pull setting and refresh on the right.

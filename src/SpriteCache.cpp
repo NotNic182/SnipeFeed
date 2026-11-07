@@ -1,4 +1,5 @@
 #include "SpriteCache.hpp"
+#include "SkillTriangle.hpp"
 #include "Web.hpp"
 #include "main.hpp"
 
@@ -6,9 +7,12 @@
 #include "bsml/shared/BSML/MainThreadScheduler.hpp"
 
 #include "UnityEngine/Object.hpp"
+#include "UnityEngine/Texture2D.hpp"
+#include "UnityEngine/TextureWrapMode.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <format>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,7 +23,7 @@ namespace SnipeFeed::SpriteCache {
     namespace {
         // Every container below is read and written on the main thread only;
         // the download thread hands its result back via MainThreadScheduler.
-        std::unordered_map<std::string, SafePtrUnity<UnityEngine::Sprite>> cache;
+        std::unordered_map<std::string, safe_ptr<UnityEngine::Sprite*, true>> cache;
         std::unordered_set<std::string> failed;
         std::unordered_map<std::string, std::vector<std::function<void(UnityEngine::Sprite*)>>> pending;
 
@@ -98,6 +102,38 @@ namespace SnipeFeed::SpriteCache {
                 for (auto& cb : callbacks) cb(sprite);
             });
         }).detach();
+    }
+
+    UnityEngine::Sprite* GetTriangleSprite(float passRating, float accRating, float techRating, int size) {
+        std::string key = std::format("triangle:{}:{:.2f}:{:.2f}:{:.2f}", size, passRating, accRating, techRating);
+        auto hit = cache.find(key);
+        if (hit != cache.end() && hit->second) {
+            auto pos = std::find(loadOrder.begin(), loadOrder.end(), key);
+            if (pos != loadOrder.end()) loadOrder.erase(pos);
+            loadOrder.push_back(key);
+            return hit->second.ptr();
+        }
+        if (failed.contains(key)) return nullptr;
+
+        // Same decode path as cover art (PNG -> ArrayToSprite).
+        std::string png = SkillTriangle::RenderPng(passRating, accRating, techRating, size);
+        UnityEngine::Sprite* sprite = nullptr;
+        if (!png.empty()) {
+            ArrayW<uint8_t> bytes(static_cast<il2cpp_array_size_t>(png.size()));
+            std::memcpy(bytes.begin(), png.data(), png.size());
+            sprite = BSML::Lite::ArrayToSprite(bytes);
+        }
+        if (!sprite) {
+            SnipeFeedLogger.warn("Failed to build skill triangle {}", key);
+            failed.insert(key);
+            return nullptr;
+        }
+        if (auto texture = sprite->get_texture())
+            texture->set_wrapMode(UnityEngine::TextureWrapMode::Clamp);
+        cache[key] = sprite;
+        loadOrder.push_back(key);
+        EvictIfNeeded();
+        return sprite;
     }
 
     void ClearCache() {

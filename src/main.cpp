@@ -25,7 +25,7 @@ MOD_EXPORT void late_load() {
     // before any of them can race it.
     curl_global_init(CURL_GLOBAL_ALL);
 
-    il2cpp_functions::Init();
+    i2c::functions::initialize();
     custom_types::Register::AutoRegister();
 
     BSML::Init();
@@ -35,5 +35,5 @@ MOD_EXPORT void late_load() {
     // (mod-provided flows like Multiplayer+).
     BSML::Register::RegisterGameplaySetupTab("Snipe Feed", SnipeFeed::FeedView::TabActivated, BSML::MenuType::All);
 
-    SnipeFeedLogger.info("SnipeFeed {} loaded! Game version: {}", VERSION, "1.40.8");
+    SnipeFeedLogger.info("SnipeFeed {} loaded! Game version: {}", VERSION, TARGET_GAME_VERSION);
 }

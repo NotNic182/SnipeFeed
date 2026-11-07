@@ -1,5 +1,9 @@
 #pragma once
 
+// First: beatsaber-hook 9's utils.hpp needs scotland2's modloader types
+// declared before any cordl/custom-types header pulls it in.
+#include "main.hpp"
+
 #include "Feed.hpp"
 
 #include "custom-types/shared/macros.hpp"
@@ -29,12 +33,9 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, playerText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, timeText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, statsText);
-    // Three per-axis rating tiers as plain colored text — "Pass <n>", "Acc
-    // <n>", "Tech <n>" (green/blue/red). Text-only after the triangle and the
-    // energy-bar graphic both failed on-device; no images, no geometry.
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, passLabel);
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, accLabel);
-    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, techLabel);
+    // BeatLeader-style Pass/Acc/Tech triangle (SkillTriangle.hpp), a plain
+    // sprite drawn on the CPU; hidden for maps without ratings.
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, triangleImage);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, styleText);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, chevronText);
 
@@ -52,7 +53,9 @@ DECLARE_CLASS_CODEGEN(SnipeFeed, FeedCell, HMUI::TableCell) {
     static UnityEngine::Color LoadedTint() { return {1.0f, 1.0f, 1.0f, 1.0f}; }
 
     static FeedCell* GetCell(HMUI::TableView* tableView);
-    void SetData(SnipeFeed::FeedEntry const& entry, int rank);
+    // sortValue: what a profile row is sorted by (Format::SortValue), shown
+    // before the time; empty on the following feed.
+    void SetData(SnipeFeed::FeedEntry const& entry, int rank, std::string const& sortValue = "");
 
    private:
     void RefreshBackground();

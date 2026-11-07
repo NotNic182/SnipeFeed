@@ -1,5 +1,9 @@
 #pragma once
 
+// First: beatsaber-hook 9's utils.hpp needs scotland2's modloader types
+// declared before any cordl/custom-types header pulls it in.
+#include "main.hpp"
+
 #include "custom-types/shared/macros.hpp"
 #include "GlobalNamespace/BeatmapLevel.hpp"
 #include "HMUI/ImageView.hpp"
@@ -31,8 +35,12 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, detailText);
     DECLARE_INSTANCE_FIELD(UnityEngine::UI::Button*, playButton);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, playButtonText);
+    // My Profile only: flips the sort direction.
+    DECLARE_INSTANCE_FIELD(UnityEngine::UI::Button*, orderButton);
+    DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, orderButtonText);
     DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalCover);
     DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalAvatar);
+    DECLARE_INSTANCE_FIELD(HMUI::ImageView*, modalTriangle);
     DECLARE_INSTANCE_FIELD(TMPro::TextMeshProUGUI*, modalPlayerText);
     DECLARE_INSTANCE_FIELD(StringW, modalPendingCover);
     DECLARE_INSTANCE_FIELD(StringW, modalPendingAvatar);
@@ -51,6 +59,7 @@ DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedView, UnityEngine::MonoBehaviour
     void DidActivate(bool firstActivation);
     void RebuildFilter();
     void RebuildList();
+    void UpdateOrderButton();
     void OnCellClicked(int listIdx);
     void PlaySelected();
     void LaunchLevel(GlobalNamespace::BeatmapLevel* level);

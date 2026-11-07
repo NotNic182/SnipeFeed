@@ -1,7 +1,7 @@
 #include "Web.hpp"
 #include "main.hpp"
 
-#include "beatsaber-hook/shared/config/config-utils.hpp"
+#include "beatsaber-hook/shared/utils.hpp"
 
 #include "libcurl/shared/curl.h"
 #include "libcurl/shared/easy.h"
@@ -58,7 +58,7 @@ namespace SnipeFeed::Web {
         // native TLS (observed on-device as curl error 60 on every request).
         // The system path stays as a fallback for installs missing the copy.
         // Both statics are computed once, thread-safely, on first request.
-        static std::string const caBundle = getDataDir(modInfo) + "cacert.pem";
+        static std::string const caBundle = get_data_dir(modInfo) + "cacert.pem";
         static bool const haveBundle = [] {
             std::error_code existsError;
             return std::filesystem::exists(caBundle, existsError);

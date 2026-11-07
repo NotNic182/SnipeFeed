@@ -4,6 +4,7 @@
 #include "Format.hpp"
 #include "ScrollBar.hpp"
 #include "ModConfig.hpp"
+#include "ProfileSort.hpp"
 #include "SongInstaller.hpp"
 #include "SpriteCache.hpp"
 #include "main.hpp"
@@ -62,7 +63,8 @@ namespace {
         std::string playerFilter;           // empty = all players
         ProfileSummary profile;
         int profileTotalScores = 0;
-        int profileSort = 0;
+        int profileSort = ProfileSort::DEFAULT;
+        bool profileAscending = false;      // Date (the default) starts newest first
         bool showingProfile = false;
         int selected = -1;
         bool busyPlaying = false;
@@ -72,43 +74,22 @@ namespace {
         // wrong here: it is a raw pointer whose alive-check DEREFERENCES that
         // pointer, and stored in native memory it neither keeps the object
         // alive nor nulls when the GC collects it — a use-after-free on
-        // every async completion. SafePtrUnity holds a GC handle (memory
-        // stays valid) and its bool checks m_CachedPtr on live memory, so it
-        // correctly reports Unity destruction. Main thread only.
-        SafePtrUnity<SnipeFeed::FeedView> activeView;
+        // every async completion. safe_ptr (beatsaber-hook 9's replacement
+        // for SafePtrUnity) holds a GC handle (memory stays valid) and, with
+        // its Unity flag set, its bool checks m_CachedPtr on live memory, so
+        // it correctly reports Unity destruction. The flag is passed
+        // explicitly rather than inferred from the type so the alive-check
+        // can never silently drop out. Main thread only.
+        safe_ptr<SnipeFeed::FeedView*, true> activeView;
     };
     FeedState state;
-
-    struct ProfileSortOption {
-        char const* label;
-        char const* sortBy;
-        char const* order;
-    };
-    // Server-side orderings on GET /player/{id}/scores. Every sortBy/order
-    // value here is a hardcoded, URL-safe constant confirmed against the
-    // live BeatLeader API (all returned HTTP 200 with correctly-ordered,
-    // populated data). Appended after the original five so existing indices
-    // and the default (index 0 = Newest) are unchanged. Only the My Profile
-    // feed uses these; the Following feed stays newest-first (friendScores).
-    constexpr ProfileSortOption PROFILE_SORTS[] = {
-        {"Newest", "date", "desc"},
-        {"Stars: high to low", "stars", "desc"},
-        {"Stars: low to high", "stars", "asc"},
-        {"Accuracy: best first", "acc", "desc"},
-        {"Accuracy: worst first", "acc", "asc"},
-        {"PP: high to low", "pp", "desc"},
-        {"Oldest first", "date", "asc"},
-        {"Best placement", "rank", "asc"},
-        {"Max streak", "maxStreak", "desc"},
-        {"Most mistakes", "mistakes", "desc"},
-    };
 
     std::vector<FeedEntry>& CurrentEntries() {
         return state.showingProfile ? state.profileEntries : state.feedEntries;
     }
 
     // The live view to deliver deferred results to, or nullptr. Main thread
-    // only — resolving a SafePtr is a GC-handle read.
+    // only — resolving a safe_ptr is a GC-handle read.
     SnipeFeed::FeedView* ActiveViewAlive() {
         return state.activeView ? state.activeView.ptr() : nullptr;
     }
@@ -128,13 +109,20 @@ namespace {
     // controls or fonts, retune this.
     constexpr float HEADER_HEIGHT = 20.0f;
 
+    // Detail modal layout.
+    constexpr float MODAL_WIDTH = 76.0f;
+    constexpr int MODAL_PADDING = 2;
+    constexpr float MODAL_COVER = 16.0f;
+    constexpr float MODAL_GAP = 2.0f;
+    constexpr int MODAL_TRIANGLE_PIXELS = 128;
+
     // Where a Play can actually go right now. Computed in one place so the
     // button state (OnCellClicked) and the launch path (LaunchLevel) can
     // never drift apart.
     bool IsSoloFlowOnTop() {
         auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
         HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
-        return youngest && il2cpp_utils::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator>(youngest).has_value();
+        return youngest && i2c::try_cast<GlobalNamespace::SoloFreePlayFlowCoordinator*>(youngest) != nullptr;
     }
 
     GlobalNamespace::LevelCollectionNavigationController* ActivePicker() {
@@ -156,15 +144,15 @@ void FeedView::RebuildFilter() {
     // its modal blocker and can eat all menu input until a scene change.
     // _modalView is declared on DropdownWithTableView (SimpleTextDropdown's
     // base class) in the installed headers, typed UnityW<HMUI::ModalViewBase>
-    // — a UnityW (so .unsafePtr() applies), but the BASE class, and _isShown
+    // — a UnityW (so .unsafe_ptr() applies), but the BASE class, and _isShown
     // is only declared on the derived HMUI::ModalView. A checked cast (same
-    // il2cpp_utils::try_cast idiom as IsSoloFlowOnTop above) bridges that
-    // instead of the brief's direct pointer.
+    // i2c::try_cast idiom as IsSoloFlowOnTop above, nullptr on mismatch)
+    // bridges that instead of the brief's direct pointer.
     if (auto* dropdown = filterContainer->GetComponentInChildren<HMUI::SimpleTextDropdown*>()) {
-        if (auto* modalBase = dropdown->_modalView.unsafePtr()) {
-            auto modal = il2cpp_utils::try_cast<HMUI::ModalView>(modalBase);
-            if (modal.has_value() && (*modal)->_isShown)
-                (*modal)->Hide(false, nullptr);
+        if (auto* modalBase = dropdown->_modalView.unsafe_ptr()) {
+            auto* modal = i2c::try_cast<HMUI::ModalView*>(modalBase);
+            if (modal && modal->_isShown)
+                modal->Hide(false, nullptr);
         }
     }
 
@@ -173,7 +161,7 @@ void FeedView::RebuildFilter() {
 
     state.filterNames.clear();
     if (state.showingProfile) {
-        for (auto const& option : PROFILE_SORTS)
+        for (auto const& option : ProfileSort::OPTIONS)
             state.filterNames.push_back(option.label);
     } else {
         state.filterNames.push_back(FILTER_ALL);
@@ -183,7 +171,7 @@ void FeedView::RebuildFilter() {
     std::vector<std::string_view> views(state.filterNames.begin(), state.filterNames.end());
 
     std::string current = state.showingProfile
-        ? PROFILE_SORTS[state.profileSort].label
+        ? ProfileSort::Get(state.profileSort).label
         : (state.playerFilter.empty() ? FILTER_ALL : state.playerFilter);
 
     auto self = this;
@@ -192,10 +180,12 @@ void FeedView::RebuildFilter() {
     BSML::Lite::CreateDropdown(filterContainer, "", current, views, [self](StringW value) {
         std::string selected = static_cast<std::string>(value);
         if (state.showingProfile) {
-            for (int i = 0; i < static_cast<int>(std::size(PROFILE_SORTS)); i++) {
-                if (selected == PROFILE_SORTS[i].label) {
+            for (int i = 0; i < ProfileSort::COUNT; i++) {
+                if (selected == ProfileSort::OPTIONS[i].label) {
                     if (state.profileSort != i) {
                         state.profileSort = i;
+                        state.profileAscending = ProfileSort::OPTIONS[i].ascendingByDefault;
+                        self->UpdateOrderButton();
                         self->RefreshProfile();
                     }
                     return;
@@ -206,6 +196,14 @@ void FeedView::RebuildFilter() {
             self->RebuildList();
         }
     });
+    UpdateOrderButton();
+}
+
+void FeedView::UpdateOrderButton() {
+    if (!orderButton) return;
+    orderButton->get_gameObject()->SetActive(state.showingProfile);
+    if (orderButtonText)
+        orderButtonText->set_text(ProfileSort::OrderLabel(state.profileSort, state.profileAscending));
 }
 
 void FeedView::RebuildList() {
@@ -232,11 +230,13 @@ void FeedView::RebuildList() {
             std::string countryRank = (!p.country.empty() && p.countryRank > 0)
                 ? std::format(" • {} #{}", Format::Escape(p.country), p.countryRank)
                 : "";
+            auto const& sort = ProfileSort::Get(state.profileSort);
             statusText->set_text(std::format(
-                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} scores • {}",
+                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} {}scores • {}, {}",
                 Format::Escape(p.name), p.pp, p.rank, countryRank,
                 p.averageRankedAccuracy * 100.0f, entries.size(), state.profileTotalScores,
-                PROFILE_SORTS[state.profileSort].label));
+                sort.rankedOnly ? "ranked " : "", sort.label,
+                ProfileSort::OrderLabel(state.profileSort, state.profileAscending)));
         } else if (state.playerFilter.empty()) {
             statusText->set_text(std::format("{} recent scores. Newest first — go snipe!", entries.size()));
         } else {
@@ -247,8 +247,13 @@ void FeedView::RebuildList() {
 
 HMUI::TableCell* FeedView::CellForIdx(HMUI::TableView* tableView, int idx) {
     auto cell = FeedCell::GetCell(tableView);
-    if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
-        cell->SetData(CurrentEntries()[state.visible[idx]], idx + 1);
+    if (idx >= 0 && idx < static_cast<int>(state.visible.size())) {
+        auto const& entry = CurrentEntries()[state.visible[idx]];
+        std::string sortValue = state.showingProfile
+            ? Format::SortValue(entry, ProfileSort::Get(state.profileSort).sortBy)
+            : "";
+        cell->SetData(entry, idx + 1, sortValue);
+    }
     return cell;
 }
 
@@ -280,11 +285,22 @@ void FeedView::OnCellClicked(int listIdx) {
             info += "\n<size=85%>" + diffLine + "</size>";
         }
         info += "\n" + Format::StatsLine(e);
+        if (auto extra = Format::ExtraStatsLine(e); !extra.empty())
+            info += "\n" + extra;
         info += "\n" + Format::MapStyleLine(e);
         info += "\n<size=75%><color=#777777>" + Format::TimeAgo(e.timepost) + "</color></size>";
         detailText->set_text(info);
     }
     if (modalPlayerText) modalPlayerText->set_text(Format::Escape(e.playerName));
+    if (modalTriangle) {
+        UnityEngine::Sprite* triangle = e.hasRatings
+            ? SpriteCache::GetTriangleSprite(e.passRating, e.accRating, e.techRating, MODAL_TRIANGLE_PIXELS)
+            : nullptr;
+        modalTriangle->set_sprite(triangle);
+        // Inactive children drop out of the layout, so unrated maps don't
+        // leave an empty gap under the cover.
+        modalTriangle->get_gameObject()->SetActive(triangle != nullptr);
+    }
 
     // Images, with the same stale-guard the cells use.
     modalPendingCover = e.coverUrl;
@@ -298,9 +314,9 @@ void FeedView::OnCellClicked(int listIdx) {
         modalAvatar->set_color(FeedCell::PlaceholderTint());
     }
     // SpriteCache callbacks are created, stored, invoked and destroyed on
-    // the main thread only, so a SafePtrUnity capture is legal here and
-    // both roots the view and reports its destruction.
-    SafePtrUnity<FeedView> safeSelf(this);
+    // the main thread only, so a safe_ptr capture is legal here and both
+    // roots the view and reports its destruction.
+    safe_ptr<FeedView*, true> safeSelf(this);
     if (!e.coverUrl.empty()) {
         SpriteCache::GetSprite(e.coverUrl, [safeSelf, url = e.coverUrl](UnityEngine::Sprite* sprite) {
             if (!safeSelf || !safeSelf->modalCover) return;
@@ -407,7 +423,7 @@ void FeedView::PlaySelected() {
     if (playButtonText) playButtonText->set_text("Downloading...");
 
     // This callback crosses the installer's non-attached worker thread —
-    // constructing/copying/destroying a SafePtr there is not legal (GC
+    // constructing/copying/destroying a safe_ptr there is not legal (GC
     // handle ops need an attached thread), so it captures only plain data
     // and resolves the live view on the main thread via state.activeView.
     Installer::DownloadAndInstallAsync(entry.songHash, [entry](bool success, std::string error) {
@@ -561,9 +577,9 @@ void FeedView::RefreshProfile() {
     std::string playerInput = getModConfig().PlayerId.GetValue();
     int count = std::clamp(getModConfig().FeedCount.GetValue(), 10, 100);
     int sortIndex = state.profileSort;
-    auto const sort = PROFILE_SORTS[sortIndex];
+    bool ascending = state.profileAscending;
     FetchProfileAsync(
-        playerInput, sort.sortBy, sort.order, count,
+        playerInput, ProfileSort::Query(sortIndex, ascending), count,
         [generation](std::string progress) {
             BSML::MainThreadScheduler::Schedule([generation, progress = std::move(progress)] {
                 if (generation != state.profileRefreshGeneration.load() || !state.showingProfile) return;
@@ -571,14 +587,14 @@ void FeedView::RefreshProfile() {
                 if (view && view->statusText) view->statusText->set_text(progress);
             });
         },
-        [generation, sortIndex](ProfileResult result) {
+        [generation, sortIndex, ascending](ProfileResult result) {
             state.profileRefreshInFlight.store(false);
-            BSML::MainThreadScheduler::Schedule([generation, sortIndex, result = std::move(result)]() mutable {
+            BSML::MainThreadScheduler::Schedule([generation, sortIndex, ascending, result = std::move(result)]() mutable {
                 if (generation != state.profileRefreshGeneration.load()) return;
                 auto* view = ActiveViewAlive();
-                // A dropdown change while the old request was running must
-                // not label old-order data as the newly selected order.
-                if (sortIndex != state.profileSort) {
+                // A sort or direction change while the old request was
+                // running must not label old-order data as the new order.
+                if (sortIndex != state.profileSort || ascending != state.profileAscending) {
                     if (view && state.showingProfile) view->RefreshProfile();
                     return;
                 }
@@ -688,6 +704,16 @@ void FeedView::BuildUI() {
     navElement->set_preferredWidth(CONTENT_WIDTH);
     BSML::Lite::CreateUIButton(navRow->get_transform(), "Following", [self]() { self->ShowFollowing(); });
     BSML::Lite::CreateUIButton(navRow->get_transform(), "My Profile", [self]() { self->ShowProfile(); });
+    // Sort direction for My Profile; lives up here because the control row
+    // below has no room left next to the sort dropdown. Hidden on Following.
+    // Fixed width so the longest label ("Shortest first") fits.
+    orderButton = BSML::Lite::CreateUIButton(navRow->get_transform(), "", {0.0f, 0.0f}, {28.0f, 0.0f}, [self]() {
+        state.profileAscending = !state.profileAscending;
+        self->UpdateOrderButton();
+        self->RefreshProfile();
+    });
+    orderButtonText = orderButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
+    UpdateOrderButton();
 
     // Single control row: player filter dropdown on the left, scores-to-
     // pull setting and refresh on the right.
@@ -831,28 +857,51 @@ void FeedView::BuildUI() {
     // Detail modal: cover art + song text on top, avatar + player row,
     // stats, then the play button. Sized to stay inside the gameplay
     // setup panel.
-    detailModal = BSML::Lite::CreateModal(get_transform(), {76.0f, 46.0f}, nullptr, true);
+    detailModal = BSML::Lite::CreateModal(get_transform(), {MODAL_WIDTH, 52.0f}, nullptr, true);
     auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
     modalLayout->set_childControlWidth(true);
     modalLayout->set_childControlHeight(true);
     modalLayout->set_childForceExpandWidth(true);
     modalLayout->set_childForceExpandHeight(false);
     modalLayout->set_spacing(1.0f);
-    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(2, 2, 2, 2));
+    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(MODAL_PADDING, MODAL_PADDING, MODAL_PADDING, MODAL_PADDING));
 
     auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     coverRow->set_childControlWidth(true);
     coverRow->set_childControlHeight(true);
     coverRow->set_childForceExpandWidth(false);
-    coverRow->set_spacing(2.0f);
-    modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {16.0f, 16.0f});
+    coverRow->set_childAlignment(UnityEngine::TextAnchor::UpperLeft);
+    coverRow->set_spacing(MODAL_GAP);
+    // Left column: cover, then the skill triangle under it.
+    auto coverColumn = BSML::Lite::CreateVerticalLayoutGroup(coverRow->get_transform());
+    coverColumn->set_childControlWidth(true);
+    coverColumn->set_childControlHeight(true);
+    coverColumn->set_childForceExpandWidth(false);
+    coverColumn->set_childForceExpandHeight(false);
+    coverColumn->set_childAlignment(UnityEngine::TextAnchor::UpperCenter);
+    coverColumn->set_spacing(1.0f);
+    auto columnElement = coverColumn->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    columnElement->set_preferredWidth(MODAL_COVER);
+    modalCover = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {MODAL_COVER, MODAL_COVER});
     auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-    coverElement->set_preferredWidth(16.0f);
-    coverElement->set_preferredHeight(16.0f);
+    coverElement->set_preferredWidth(MODAL_COVER);
+    coverElement->set_preferredHeight(MODAL_COVER);
     modalCover->set_preserveAspect(true);
+    modalTriangle = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {14.0f, 14.0f});
+    auto triangleElement = modalTriangle->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    triangleElement->set_preferredWidth(14.0f);
+    triangleElement->set_preferredHeight(14.0f);
+    modalTriangle->set_preserveAspect(true);
+    modalTriangle->set_raycastTarget(false);
     detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
     detailText->set_fontSize(3.0f);
     detailText->set_enableWordWrapping(true);
+    // Without a fixed width a long line widens the whole row past the modal
+    // and pushes the cover and player name off its left edge; this makes it
+    // wrap instead.
+    auto detailElement = detailText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    detailElement->set_preferredWidth(MODAL_WIDTH - 2.0f * MODAL_PADDING - MODAL_COVER - MODAL_GAP);
+    detailElement->set_flexibleWidth(0.0f);
 
     auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     playerRow->set_childControlWidth(true);
@@ -876,11 +925,10 @@ void FeedView::BuildUI() {
 void FeedView::OnDestroy() {
     // Un-pin the GC root when the pinned view is the one being destroyed;
     // a dead view must not stay rooted until the next activation.
-    // state.activeView = SafePtrUnity<FeedView>() is not legal here either
-    // (same deleted operator= as DidActivate) — clear() is the equivalent
-    // reset to empty. The bool check guards ptr(): SafePtrUnity::ptr()
-    // throws/crashes on an empty or already-dead handle rather than
-    // returning nullptr, and a FeedView destroyed before ever being
+    // clear() (not assignment from an empty safe_ptr) is the reset: it is
+    // the path that frees the GC-fixed handle (see DidActivate). The bool
+    // check guards ptr(): safe_ptr::ptr() throws on an empty handle rather
+    // than returning nullptr, and a FeedView destroyed before ever being
     // activated leaves state.activeView empty.
     if (state.activeView && state.activeView.ptr() == this)
         state.activeView.clear();
@@ -896,7 +944,7 @@ void FeedView::DidActivate(bool firstActivation) {
             height = rect->get_rect().get_height();
         if (height <= 30.0f && buildAttempts < 5) {
             buildAttempts++;
-            SafePtrUnity<FeedView> safeSelf(this);
+            safe_ptr<FeedView*, true> safeSelf(this);
             BSML::MainThreadScheduler::Schedule([safeSelf]() mutable {
                 if (safeSelf) safeSelf->DidActivate(false);
             });
@@ -907,12 +955,10 @@ void FeedView::DidActivate(bool firstActivation) {
 
     // In-flight fetch results and progress land on the most recently
     // activated view — that's us now.
-    // SafePtrUnity's copy-assignment is implicitly deleted (it declares a
-    // move constructor, which per [class.copy.assign] suppresses the
-    // implicit copy-assign operator), and the only other operator= overloads
-    // take T*/T& by IMPLICIT conversion — SafePtrUnity's operator T* is
-    // explicit, so it can't satisfy them either. emplace() performs the
-    // equivalent rooting without going through operator=.
+    // emplace() rather than operator=: beatsaber-hook 9's safe_ptr copy-
+    // assignment only re-points the shared refcounted handle, while
+    // emplace() goes through clear(), which GC-frees the previous handle
+    // once nothing else references it.
     state.activeView.emplace(this);
 
     // Defensive: if a hide was ever interrupted (menu hop, tab switch),

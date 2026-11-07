@@ -619,6 +619,17 @@ namespace SnipeFeed {
                     if (authCode == 200 && tryPopulateProfile(authBody)) {
                         haveProfile = true;
                         authCookie = cookieFile;
+                        // The login endpoint leaves out scoreStats (ranked
+                        // avg acc showed 0.00%), so fill them in from the
+                        // full profile; keep the login's answer if that fails.
+                        if (result.profile.averageRankedAccuracy <= 0.0f) {
+                            ProfileSummary fromLogin = result.profile;
+                            std::string statsBody;
+                            long statsCode = Web::Get(std::string(API_URL) + "/player/" + fromLogin.id + "?stats=true",
+                                                      TIMEOUT_SECONDS, statsBody, authCookie);
+                            if (statsCode != 200 || !tryPopulateProfile(statsBody) || result.profile.id != fromLogin.id)
+                                result.profile = std::move(fromLogin);
+                        }
                     } else if (authCode == 200) {
                         SnipeFeedLogger.info("Authenticated profile response had no usable player id, falling back to configured PlayerId");
                     } else {

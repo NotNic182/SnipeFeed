@@ -13,6 +13,9 @@
 // refresh.
 namespace SnipeFeed::SpriteCache {
     void GetSprite(std::string const& url, std::function<void(UnityEngine::Sprite*)> onSprite);
+    // Skill triangle sprite (SkillTriangle.hpp), drawn on first use and kept
+    // in the same bounded cache. Main thread only; nullptr if it failed.
+    UnityEngine::Sprite* GetTriangleSprite(float passRating, float accRating, float techRating, int size);
     void ClearCache();
     // Clears only the failed-URL memo (not the sprite cache or in-flight
     // downloads), so images that failed during a transient network loss get

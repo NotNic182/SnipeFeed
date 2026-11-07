@@ -193,22 +193,21 @@ namespace SnipeFeed::Format {
         return text.empty() ? "" : "<color=#FFD27A>" + text + "</color>";
     }
 
-    // One small line of extra score stats for the detail modal.
+    // One short line of extra score stats for the detail modal. Zero pauses,
+    // plays, views and nominations are left out to keep it short.
     inline std::string ExtraStatsLine(FeedEntry const& e) {
         std::vector<std::string> parts;
         if (e.placement > 0) parts.push_back("#" + Thousands(e.placement) + " on map");
         if (e.mistakes >= 0) parts.push_back(Count(e.mistakes, "mistake", "mistakes"));
-        if (e.pauses >= 0) parts.push_back(Count(e.pauses, "pause", "pauses"));
-        if (e.maxStreak >= 0) parts.push_back("streak " + Thousands(e.maxStreak));
+        if (e.pauses > 0) parts.push_back(Count(e.pauses, "pause", "pauses"));
+        if (e.maxStreak > 0) parts.push_back("streak " + Thousands(e.maxStreak));
         if (e.playCount > 0) parts.push_back(Count(e.playCount, "play", "plays"));
         if (e.replaysWatched > 0) parts.push_back(Thousands(e.replaysWatched) + " watched");
         if (e.nominations > 0) parts.push_back(Count(e.nominations, "nomination", "nominations"));
-        if (e.pp > 0.0f && e.accPP >= 0.0f && e.passPP >= 0.0f && e.techPP >= 0.0f)
-            parts.push_back(std::format("{:.0f} acc / {:.0f} pass / {:.0f} tech pp", e.accPP, e.passPP, e.techPP));
         if (parts.empty()) return "";
         std::string line;
         for (auto const& part : parts) {
-            if (!line.empty()) line += "  •  ";
+            if (!line.empty()) line += " • ";
             line += part;
         }
         return "<size=70%><color=#AABBCC>" + line + "</color></size>";

@@ -106,6 +106,13 @@ namespace {
     // controls or fonts, retune this.
     constexpr float HEADER_HEIGHT = 20.0f;
 
+    // Detail modal layout.
+    constexpr float MODAL_WIDTH = 76.0f;
+    constexpr int MODAL_PADDING = 2;
+    constexpr float MODAL_COVER = 16.0f;
+    constexpr float MODAL_GAP = 2.0f;
+    constexpr int MODAL_TRIANGLE_PIXELS = 128;
+
     // Where a Play can actually go right now. Computed in one place so the
     // button state (OnCellClicked) and the launch path (LaunchLevel) can
     // never drift apart.
@@ -282,6 +289,15 @@ void FeedView::OnCellClicked(int listIdx) {
         detailText->set_text(info);
     }
     if (modalPlayerText) modalPlayerText->set_text(Format::Escape(e.playerName));
+    if (modalTriangle) {
+        UnityEngine::Sprite* triangle = e.hasRatings
+            ? SpriteCache::GetTriangleSprite(e.passRating, e.accRating, e.techRating, MODAL_TRIANGLE_PIXELS)
+            : nullptr;
+        modalTriangle->set_sprite(triangle);
+        // Inactive children drop out of the layout, so unrated maps don't
+        // leave an empty gap under the cover.
+        modalTriangle->get_gameObject()->SetActive(triangle != nullptr);
+    }
 
     // Images, with the same stale-guard the cells use.
     modalPendingCover = e.coverUrl;
@@ -838,28 +854,51 @@ void FeedView::BuildUI() {
     // Detail modal: cover art + song text on top, avatar + player row,
     // stats, then the play button. Sized to stay inside the gameplay
     // setup panel.
-    detailModal = BSML::Lite::CreateModal(get_transform(), {76.0f, 46.0f}, nullptr, true);
+    detailModal = BSML::Lite::CreateModal(get_transform(), {MODAL_WIDTH, 52.0f}, nullptr, true);
     auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
     modalLayout->set_childControlWidth(true);
     modalLayout->set_childControlHeight(true);
     modalLayout->set_childForceExpandWidth(true);
     modalLayout->set_childForceExpandHeight(false);
     modalLayout->set_spacing(1.0f);
-    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(2, 2, 2, 2));
+    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(MODAL_PADDING, MODAL_PADDING, MODAL_PADDING, MODAL_PADDING));
 
     auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     coverRow->set_childControlWidth(true);
     coverRow->set_childControlHeight(true);
     coverRow->set_childForceExpandWidth(false);
-    coverRow->set_spacing(2.0f);
-    modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {16.0f, 16.0f});
+    coverRow->set_childAlignment(UnityEngine::TextAnchor::UpperLeft);
+    coverRow->set_spacing(MODAL_GAP);
+    // Left column: cover, then the skill triangle under it.
+    auto coverColumn = BSML::Lite::CreateVerticalLayoutGroup(coverRow->get_transform());
+    coverColumn->set_childControlWidth(true);
+    coverColumn->set_childControlHeight(true);
+    coverColumn->set_childForceExpandWidth(false);
+    coverColumn->set_childForceExpandHeight(false);
+    coverColumn->set_childAlignment(UnityEngine::TextAnchor::UpperCenter);
+    coverColumn->set_spacing(1.0f);
+    auto columnElement = coverColumn->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    columnElement->set_preferredWidth(MODAL_COVER);
+    modalCover = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {MODAL_COVER, MODAL_COVER});
     auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-    coverElement->set_preferredWidth(16.0f);
-    coverElement->set_preferredHeight(16.0f);
+    coverElement->set_preferredWidth(MODAL_COVER);
+    coverElement->set_preferredHeight(MODAL_COVER);
     modalCover->set_preserveAspect(true);
+    modalTriangle = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {14.0f, 14.0f});
+    auto triangleElement = modalTriangle->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    triangleElement->set_preferredWidth(14.0f);
+    triangleElement->set_preferredHeight(14.0f);
+    modalTriangle->set_preserveAspect(true);
+    modalTriangle->set_raycastTarget(false);
     detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
     detailText->set_fontSize(3.0f);
     detailText->set_enableWordWrapping(true);
+    // Without a fixed width a long line widens the whole row past the modal
+    // and pushes the cover and player name off its left edge; this makes it
+    // wrap instead.
+    auto detailElement = detailText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    detailElement->set_preferredWidth(MODAL_WIDTH - 2.0f * MODAL_PADDING - MODAL_COVER - MODAL_GAP);
+    detailElement->set_flexibleWidth(0.0f);
 
     auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     playerRow->set_childControlWidth(true);

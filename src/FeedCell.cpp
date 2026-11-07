@@ -6,6 +6,7 @@
 #include "HMUI/Touchable.hpp"
 #include "UnityEngine/Color.hpp"
 #include "UnityEngine/GameObject.hpp"
+#include "UnityEngine/UI/ContentSizeFitter.hpp"
 
 #include <format>
 
@@ -19,20 +20,23 @@ namespace {
     // Row layout, BeatLeader style, reading left to right: rank, cover,
     // then a large song title line over (avatar + name + stats + time),
     // chevron last. ids bind to the DECLARE_INSTANCE_FIELDs.
+    // Widths add up to the 90-unit list (FeedView CONTENT_WIDTH): pad 1+1,
+    // four 1.5 gaps, 3.5 + 8.5 + 55 + 11 + 3, with 1 unit spare. If they add
+    // up to more, the row squeezes the cover.
     constexpr auto CELL_BSML = R"(
-<horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='2' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' child-align='MiddleLeft' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
+<horizontal id='bgContainer' bg='round-rect-panel' bg-color='#00000073' pad='1' spacing='1.5' horizontal-fit='Unconstrained' child-expand-width='false' child-control-width='true' child-align='MiddleLeft' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='https://raw.githubusercontent.com/RedBrumbler/Quest-BSML-Docs/gh-pages/schema.xsd'>
     <text id='rankText' font-size='3' align='Center' word-wrapping='false' pref-width='3.5'/>
     <image id='coverImage' pref-width='8.5' pref-height='8.5' preserve-aspect='true'/>
-    <vertical spacing='0' pref-width='60' flexible-width='1000' child-expand-height='false' child-control-height='true'>
+    <vertical spacing='0' pref-width='55' flexible-width='1000' child-expand-height='false' child-control-height='true'>
         <text id='songText' font-size='3.4' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false'/>
         <horizontal spacing='1.5' pref-height='4.2' child-expand-width='false' child-control-width='true' child-align='MiddleLeft'>
             <image id='avatarImage' pref-width='3.5' pref-height='3.5' preserve-aspect='true'/>
             <text id='playerText' font-size='2.8' align='MidlineLeft' word-wrapping='false'/>
             <text id='statsText' font-size='2.6' align='MidlineLeft' word-wrapping='false'/>
-            <text id='timeText' font-size='2.4' color='#8899AA' align='MidlineLeft' word-wrapping='false' flexible-width='1000'/>
+            <text id='timeText' font-size='2.4' color='#8899AA' align='MidlineLeft' overflow-mode='Ellipsis' word-wrapping='false' flexible-width='1000'/>
         </horizontal>
     </vertical>
-    <vertical spacing='0.15' pref-width='15' child-expand-width='false' child-control-width='true' child-expand-height='false' child-control-height='true' child-align='MiddleCenter'>
+    <vertical spacing='0.15' pref-width='11' child-expand-width='false' child-control-width='true' child-expand-height='false' child-control-height='true' child-align='MiddleCenter'>
         <image id='triangleImage' pref-width='6.2' pref-height='6.2' preserve-aspect='true'/>
         <text id='styleText' font-size='1.55' color='#D7E5F3' align='Center' overflow-mode='Ellipsis' word-wrapping='false' pref-height='2'/>
     </vertical>
@@ -74,6 +78,12 @@ FeedCell* FeedCell::GetCell(HMUI::TableView* tableView) {
         cell->set_interactable(true);
         cell->set_reuseIdentifier(REUSE_ID);
         BSML::parse_and_construct(CELL_BSML, cell->get_transform(), cell);
+        // BSML's <vertical> adds a ContentSizeFitter that resizes the column
+        // to its preferred width after the row has laid it out, growing from
+        // the center, which pushed the song/player column over the cover.
+        // Widths come from the row layout only.
+        for (auto fitter : cell->GetComponentsInChildren<UnityEngine::UI::ContentSizeFitter*>(true))
+            fitter->set_horizontalFit(UnityEngine::UI::ContentSizeFitter::FitMode::Unconstrained);
         cell->chevronText->set_text(">");
         cell->styleText->set_raycastTarget(false);
         cell->triangleImage->set_raycastTarget(false);

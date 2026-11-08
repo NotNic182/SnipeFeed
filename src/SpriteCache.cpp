@@ -45,10 +45,7 @@ namespace SnipeFeed::SpriteCache {
                     // The texture holds the memory; the sprite is a wrapper.
                     // Cells re-request evicted URLs on their next bind.
                     if (auto* sprite = it->second.ptr()) {
-                        // get_texture() returns UnityW<Texture2D> (not a raw
-                        // pointer), so the null-check binding must be `auto`
-                        // — `auto*` cannot deduce through UnityW's implicit
-                        // conversion operator.
+                        // get_texture() is a UnityW, hence auto.
                         if (auto texture = sprite->get_texture()) UnityEngine::Object::Destroy(texture);
                         UnityEngine::Object::Destroy(sprite);
                     }

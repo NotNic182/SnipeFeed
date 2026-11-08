@@ -5,12 +5,8 @@
 #include <functional>
 #include <string>
 
-// URL -> Sprite cache for avatars and cover art, modeled on the official
-// BeatLeader mod's Sprites::get_Icon. Main-thread only: callbacks fire on
-// the main thread (synchronously on a cache hit) and never with nullptr —
-// on failure the callback simply never fires, so callers keep their
-// placeholder. Failed URLs are not retried until the next successful feed
-// refresh.
+// URL -> sprite cache for covers and avatars. Main thread only. Callbacks
+// never get nullptr; on failure they just don't fire.
 namespace SnipeFeed::SpriteCache {
     void GetSprite(std::string const& url, std::function<void(UnityEngine::Sprite*)> onSprite);
     // Skill triangle sprite (SkillTriangle.hpp), drawn on first use and kept

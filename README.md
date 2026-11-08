@@ -5,9 +5,9 @@ Your BeatLeader following feed inside Beat Saber — on **Quest standalone and P
 
 ## Current status
 
-The current `main` branch contains the Quest **v3.3.2** update. The Quest package manifests report `3.3.2`, and the remote `v3.3.2` tag points to this update, which adds **My Profile**, server-side score ordering, exact Pass/Acc/Tech tiers, adaptive feed sizing, and the draggable side scrollbar documented below.
+This branch is the Beat Saber **1.40.8** build of Quest **v3.4.0**, same features as the 1.45.3 build on `main`.
 
-The PCVR project is a separate build target and remains at **2.0.1-pc.1** (`pcvr/manifest.json`); the v3.3.2 changes are Quest-only.
+PCVR is its own build and is still **2.0.1-pc.1** (`pcvr/manifest.json`).
 
 ## Screenshots
 

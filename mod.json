@@ -8,6 +8,7 @@
   "version": "3.4.0",
   "packageId": "com.beatgames.beatsaber",
   "packageVersion": "1.45.3_30054",
+  "coverImage": "cover.png",
   "description": "See your BeatLeader following feed in-game: your friends' latest scores in one list so you know exactly which maps to snipe.",
   "dependencies": [
     {

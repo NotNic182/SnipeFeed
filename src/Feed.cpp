@@ -567,11 +567,7 @@ namespace SnipeFeed {
                 ProfileResult result;
                 std::string input = SanitizeInput(playerInput);
                 if (onProgress) onProgress("Loading your BeatLeader profile...");
-                // Parse a BeatLeader profile body into result.profile.
-                // Returns true only if the body is an object carrying a
-                // usable top-level player id — the modinterface shape is not
-                // verified in this workspace, so a 200 that does not resolve
-                // to a flat Player must NOT be treated as success.
+                // Fills result.profile; false if the body has no player id.
                 auto tryPopulateProfile = [&](std::string const& body) -> bool {
                     rapidjson::Document doc;
                     doc.Parse(body);
@@ -602,14 +598,8 @@ namespace SnipeFeed {
                 // following feed.
                 std::string authCookie;
 
-                // Prefer the official Quest mod's authenticated identity so
-                // "My Profile" really means the player logged in on this
-                // headset. Its own PlayerController uses this endpoint and
-                // the same read-only Netscape cookie jar. Fall back to
-                // SnipeFeed's configured public player ID/alias when that
-                // login is missing/expired (non-200) OR returns a 200 body we
-                // cannot resolve to a player id — a wrapped/unexpected shape
-                // must degrade to the fallback, not hard-error the tab.
+                // Prefer the BeatLeader mod's login (same endpoint and cookie jar it uses);
+                // fall back to the configured PlayerId if it's missing, expired or odd.
                 std::string cookieFile = BeatLeaderCookieFile();
                 std::error_code fsError;
                 if (std::filesystem::exists(cookieFile, fsError)) {

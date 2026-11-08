@@ -13,15 +13,8 @@
 #include "UnityEngine/EventSystems/IPointerDownHandler.hpp"
 #include "UnityEngine/EventSystems/IDragHandler.hpp"
 
-// A draggable vertical scrollbar bound to an HMUI::ScrollView, shown on the
-// right edge of the feed list so a scroll control is always visible regardless
-// of list height (the stock page arrows get pushed off-screen by the taller
-// list). The VR pointer drives it through Unity's EventSystems interfaces —
-// press or drag anywhere on the track scrolls to that position via
-// ScrollView::ScrollTo. Thumbstick scrolling is the ScrollView's own input
-// path and is left completely untouched; a scrollPositionChangedEvent
-// subscription moves the handle to match when the user scrolls by stick, so
-// the bar and the list always agree.
+// Draggable scrollbar for an HMUI::ScrollView. Pointer press/drag scrolls;
+// thumbstick scrolling is untouched and keeps the handle in sync.
 DECLARE_CLASS_CODEGEN_INTERFACES(SnipeFeed, FeedScrollBar, UnityEngine::MonoBehaviour,
         UnityEngine::EventSystems::IPointerDownHandler*, UnityEngine::EventSystems::IDragHandler*) {
     DECLARE_INSTANCE_FIELD(HMUI::ScrollView*, scrollView);

@@ -49,11 +49,9 @@ namespace SnipeFeed::Installer {
         });
     }
 
-    // Per-entry extraction instead of zip_stream_extract: the bulk helper
-    // recreates symlink entries with unrestricted targets, letting a hostile
-    // archive write through them anywhere on disk. Writing each regular file
-    // ourselves (zip_entry_fread) closes that door, and lets us refuse
-    // escape-y names and cap the decompressed size.
+    // Extract entry by entry instead of zip_stream_extract: it recreates
+    // symlinks, so a bad archive could write anywhere. This also refuses odd
+    // names and caps the unpacked size.
     static bool ExtractArchiveSafely(std::string const& zipData, std::string const& targetDir, std::string& outError) {
         constexpr unsigned long long MAX_TOTAL_BYTES = 512ull * 1024 * 1024;
 
@@ -237,10 +235,8 @@ namespace SnipeFeed::Installer {
         worker.detach();
     }
 
-    // Mirrors BeatLeader's MapDownloadDialog::OpenMap for our stack, split in
-    // two: priming must happen while the solo flow coordinator is still
-    // active (FindObjectOfType only sees active objects), pressing the Solo
-    // button only works once the main menu is visible again.
+    // Same as BeatLeader's OpenMap, split in two: prime while the Solo flow is
+    // still active, press Solo once the main menu is back.
     bool PrimeSoloFlow(GlobalNamespace::BeatmapLevel* level) {
         if (level == nullptr) return false;
 

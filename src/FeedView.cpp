@@ -4,6 +4,7 @@
 #include "Format.hpp"
 #include "ScrollBar.hpp"
 #include "ModConfig.hpp"
+#include "ProfileSort.hpp"
 #include "SongInstaller.hpp"
 #include "SpriteCache.hpp"
 #include "main.hpp"
@@ -46,9 +47,7 @@ DEFINE_TYPE(SnipeFeed, FeedView);
 using namespace SnipeFeed;
 
 namespace {
-    // Plain data, deliberately file-static: it survives the tab GameObject
-    // being recreated, which is what lets the feed persist across menu
-    // visits.
+    // File-static so the feed survives the tab being rebuilt.
     struct FeedState {
         std::atomic<int> feedRefreshGeneration{0};
         std::atomic<bool> feedRefreshInFlight{false};
@@ -62,53 +61,24 @@ namespace {
         std::string playerFilter;           // empty = all players
         ProfileSummary profile;
         int profileTotalScores = 0;
-        int profileSort = 0;
+        int profileSort = ProfileSort::DEFAULT;
+        bool profileAscending = false;      // Date (the default) starts newest first
         bool showingProfile = false;
         int selected = -1;
         bool busyPlaying = false;
         long long lastFeedFetchTime = 0;    // unix time of last successful fetch
         long long lastProfileFetchTime = 0;
-        // GC-rooted handle to the most recently activated view. UnityW was
-        // wrong here: it is a raw pointer whose alive-check DEREFERENCES that
-        // pointer, and stored in native memory it neither keeps the object
-        // alive nor nulls when the GC collects it — a use-after-free on
-        // every async completion. SafePtrUnity holds a GC handle (memory
-        // stays valid) and its bool checks m_CachedPtr on live memory, so it
-        // correctly reports Unity destruction. Main thread only.
+        // The live view async results go to. Holds a GC handle (not a raw
+        // UnityW) so it stays valid and still reports when Unity destroys it.
         SafePtrUnity<SnipeFeed::FeedView> activeView;
     };
     FeedState state;
-
-    struct ProfileSortOption {
-        char const* label;
-        char const* sortBy;
-        char const* order;
-    };
-    // Server-side orderings on GET /player/{id}/scores. Every sortBy/order
-    // value here is a hardcoded, URL-safe constant confirmed against the
-    // live BeatLeader API (all returned HTTP 200 with correctly-ordered,
-    // populated data). Appended after the original five so existing indices
-    // and the default (index 0 = Newest) are unchanged. Only the My Profile
-    // feed uses these; the Following feed stays newest-first (friendScores).
-    constexpr ProfileSortOption PROFILE_SORTS[] = {
-        {"Newest", "date", "desc"},
-        {"Stars: high to low", "stars", "desc"},
-        {"Stars: low to high", "stars", "asc"},
-        {"Accuracy: best first", "acc", "desc"},
-        {"Accuracy: worst first", "acc", "asc"},
-        {"PP: high to low", "pp", "desc"},
-        {"Oldest first", "date", "asc"},
-        {"Best placement", "rank", "asc"},
-        {"Max streak", "maxStreak", "desc"},
-        {"Most mistakes", "mistakes", "desc"},
-    };
 
     std::vector<FeedEntry>& CurrentEntries() {
         return state.showingProfile ? state.profileEntries : state.feedEntries;
     }
 
-    // The live view to deliver deferred results to, or nullptr. Main thread
-    // only — resolving a SafePtr is a GC-handle read.
+    // Main thread only.
     SnipeFeed::FeedView* ActiveViewAlive() {
         return state.activeView ? state.activeView.ptr() : nullptr;
     }
@@ -116,21 +86,21 @@ namespace {
     constexpr auto FILTER_ALL = "All players";
     constexpr long long REFRESH_MAX_AGE_SECONDS = 120;
 
-    // Shared width for the header row, the status line, and the list, so
-    // everything lines up on the same left/right edges. The gameplay setup
-    // panel's tab area is far smaller than a full screen (Qounters++ sizes
-    // its rows to 85 units there), so everything below is sized to fit
-    // roughly 90x46.
+    // Header, status line and list share this width; the gameplay setup tab
+    // is only about 90 units wide.
     constexpr float CONTENT_WIDTH = 90.0f;
-    // Vertical space reserved above the list for the control row + status
-    // line; the list is created at (measured tab height - HEADER_HEIGHT).
-    // Hand-tuned to the header BuildUI creates — if you change the header's
-    // controls or fonts, retune this.
+    // Room above the list for the controls and status line. Retune if the
+    // header changes.
     constexpr float HEADER_HEIGHT = 20.0f;
 
-    // Where a Play can actually go right now. Computed in one place so the
-    // button state (OnCellClicked) and the launch path (LaunchLevel) can
-    // never drift apart.
+    // Detail modal layout.
+    constexpr float MODAL_WIDTH = 76.0f;
+    constexpr int MODAL_PADDING = 2;
+    constexpr float MODAL_COVER = 16.0f;
+    constexpr float MODAL_GAP = 2.0f;
+    constexpr int MODAL_TRIANGLE_PIXELS = 128;
+
+    // Shared by the Play button state and LaunchLevel so they agree.
     bool IsSoloFlowOnTop() {
         auto mainFC = BSML::Helpers::GetMainFlowCoordinator();
         HMUI::FlowCoordinator* youngest = mainFC ? mainFC->YoungestChildFlowCoordinatorOrSelf() : nullptr;
@@ -152,14 +122,9 @@ void FeedView::TabActivated(UnityEngine::GameObject* gameObject, bool firstActiv
 void FeedView::RebuildFilter() {
     if (!filterContainer) return;
 
-    // If the dropdown's option list is open, destroying it mid-show orphans
-    // its modal blocker and can eat all menu input until a scene change.
-    // _modalView is declared on DropdownWithTableView (SimpleTextDropdown's
-    // base class) in the installed headers, typed UnityW<HMUI::ModalViewBase>
-    // — a UnityW (so .unsafePtr() applies), but the BASE class, and _isShown
-    // is only declared on the derived HMUI::ModalView. A checked cast (same
-    // il2cpp_utils::try_cast idiom as IsSoloFlowOnTop above) bridges that
-    // instead of the brief's direct pointer.
+    // Close the dropdown's list first if it's open: destroying it while shown
+    // leaves its modal blocker behind and eats menu input. _modalView is typed
+    // as the base ModalViewBase, so cast to ModalView to read _isShown.
     if (auto* dropdown = filterContainer->GetComponentInChildren<HMUI::SimpleTextDropdown*>()) {
         if (auto* modalBase = dropdown->_modalView.unsafePtr()) {
             auto modal = il2cpp_utils::try_cast<HMUI::ModalView>(modalBase);
@@ -173,7 +138,7 @@ void FeedView::RebuildFilter() {
 
     state.filterNames.clear();
     if (state.showingProfile) {
-        for (auto const& option : PROFILE_SORTS)
+        for (auto const& option : ProfileSort::OPTIONS)
             state.filterNames.push_back(option.label);
     } else {
         state.filterNames.push_back(FILTER_ALL);
@@ -183,7 +148,7 @@ void FeedView::RebuildFilter() {
     std::vector<std::string_view> views(state.filterNames.begin(), state.filterNames.end());
 
     std::string current = state.showingProfile
-        ? PROFILE_SORTS[state.profileSort].label
+        ? ProfileSort::Get(state.profileSort).label
         : (state.playerFilter.empty() ? FILTER_ALL : state.playerFilter);
 
     auto self = this;
@@ -192,10 +157,12 @@ void FeedView::RebuildFilter() {
     BSML::Lite::CreateDropdown(filterContainer, "", current, views, [self](StringW value) {
         std::string selected = static_cast<std::string>(value);
         if (state.showingProfile) {
-            for (int i = 0; i < static_cast<int>(std::size(PROFILE_SORTS)); i++) {
-                if (selected == PROFILE_SORTS[i].label) {
+            for (int i = 0; i < ProfileSort::COUNT; i++) {
+                if (selected == ProfileSort::OPTIONS[i].label) {
                     if (state.profileSort != i) {
                         state.profileSort = i;
+                        state.profileAscending = ProfileSort::OPTIONS[i].ascendingByDefault;
+                        self->UpdateOrderButton();
                         self->RefreshProfile();
                     }
                     return;
@@ -206,6 +173,14 @@ void FeedView::RebuildFilter() {
             self->RebuildList();
         }
     });
+    UpdateOrderButton();
+}
+
+void FeedView::UpdateOrderButton() {
+    if (!orderButton) return;
+    orderButton->get_gameObject()->SetActive(state.showingProfile);
+    if (orderButtonText)
+        orderButtonText->set_text(ProfileSort::OrderLabel(state.profileSort, state.profileAscending));
 }
 
 void FeedView::RebuildList() {
@@ -232,11 +207,13 @@ void FeedView::RebuildList() {
             std::string countryRank = (!p.country.empty() && p.countryRank > 0)
                 ? std::format(" • {} #{}", Format::Escape(p.country), p.countryRank)
                 : "";
+            auto const& sort = ProfileSort::Get(state.profileSort);
             statusText->set_text(std::format(
-                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} scores • {}",
+                "<b>{}</b> • {:.2f}pp • Global #{}{} • {:.2f}% ranked avg\n{} of {} {}scores • {}, {}",
                 Format::Escape(p.name), p.pp, p.rank, countryRank,
                 p.averageRankedAccuracy * 100.0f, entries.size(), state.profileTotalScores,
-                PROFILE_SORTS[state.profileSort].label));
+                sort.rankedOnly ? "ranked " : "", sort.label,
+                ProfileSort::OrderLabel(state.profileSort, state.profileAscending)));
         } else if (state.playerFilter.empty()) {
             statusText->set_text(std::format("{} recent scores. Newest first — go snipe!", entries.size()));
         } else {
@@ -247,8 +224,13 @@ void FeedView::RebuildList() {
 
 HMUI::TableCell* FeedView::CellForIdx(HMUI::TableView* tableView, int idx) {
     auto cell = FeedCell::GetCell(tableView);
-    if (idx >= 0 && idx < static_cast<int>(state.visible.size()))
-        cell->SetData(CurrentEntries()[state.visible[idx]], idx + 1);
+    if (idx >= 0 && idx < static_cast<int>(state.visible.size())) {
+        auto const& entry = CurrentEntries()[state.visible[idx]];
+        std::string sortValue = state.showingProfile
+            ? Format::SortValue(entry, ProfileSort::Get(state.profileSort).sortBy)
+            : "";
+        cell->SetData(entry, idx + 1, sortValue);
+    }
     return cell;
 }
 
@@ -280,11 +262,21 @@ void FeedView::OnCellClicked(int listIdx) {
             info += "\n<size=85%>" + diffLine + "</size>";
         }
         info += "\n" + Format::StatsLine(e);
+        if (auto extra = Format::ExtraStatsLine(e); !extra.empty())
+            info += "\n" + extra;
         info += "\n" + Format::MapStyleLine(e);
         info += "\n<size=75%><color=#777777>" + Format::TimeAgo(e.timepost) + "</color></size>";
         detailText->set_text(info);
     }
     if (modalPlayerText) modalPlayerText->set_text(Format::Escape(e.playerName));
+    if (modalTriangle) {
+        UnityEngine::Sprite* triangle = e.hasRatings
+            ? SpriteCache::GetTriangleSprite(e.passRating, e.accRating, e.techRating, MODAL_TRIANGLE_PIXELS)
+            : nullptr;
+        modalTriangle->set_sprite(triangle);
+        // Inactive, so unrated maps leave no gap.
+        modalTriangle->get_gameObject()->SetActive(triangle != nullptr);
+    }
 
     // Images, with the same stale-guard the cells use.
     modalPendingCover = e.coverUrl;
@@ -341,24 +333,17 @@ void FeedView::OnCellClicked(int listIdx) {
 
 void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
     if (!level) return;
-    // Hide instantly (animated=false): an animated hide would be frozen
-    // mid-flight by the flow transitions below, leaving the modal stuck on
-    // screen when the gameplay setup panel comes back.
+    // No animation, or the flow transition freezes the modal on screen.
     if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
-    // In-place selection into the solo picker is NOT a supported game
-    // operation: LevelSelectionNavigationController::Setup only stores its
-    // "select after present" state and applies it on the next activation,
-    // so every in-place attempt either no-ops or resets the picker to
-    // defaults. The game's own mechanism is re-entry — and that is only
-    // safe when the SOLO flow is what's on top (never from a lobby, where
-    // dismissing flows corrupts the menu state).
+    // Selecting in place doesn't work in Solo (the picker only applies it on
+    // its next activation), so re-enter Solo instead. Only when Solo is on
+    // top: dismissing flows from a lobby breaks the menu.
     if (IsSoloFlowOnTop()) {
         HMUI::FlowCoordinator* youngest = BSML::Helpers::GetMainFlowCoordinator()->YoungestChildFlowCoordinatorOrSelf();
         if (youngest->_parentFlowCoordinator) {
             if (!Installer::PrimeSoloFlow(level)) {
-                // The modal is already hidden — leave SOME feedback instead
-                // of silently doing nothing.
+                // The modal is already gone, so say something.
                 if (statusText)
                     statusText->set_text("<color=#ff5555>Couldn't open the song — pick it in Custom Levels.</color>");
                 return;
@@ -374,18 +359,14 @@ void FeedView::LaunchLevel(GlobalNamespace::BeatmapLevel* level) {
         }
     }
 
-    // Multiplayer's own song-select screen: its Custom Levels list is the
-    // one showing, so a plain SelectLevel works there (BetterSongSearch
-    // uses the same call). Harmless no-op if the level isn't in the shown
-    // list.
+    // Multiplayer song select: SelectLevel works directly.
     if (auto picker = ActivePicker()) {
         SnipeFeedLogger.info("LaunchLevel: selecting in active picker: {}", static_cast<std::string>(level->songName));
         picker->SelectLevel(level);
         return;
     }
 
-    // A lobby (vanilla or Multiplayer+) with no picker open. NEVER hijack
-    // flows from here — the map is installed; point the player at it.
+    // In a lobby: leave the flows alone and just tell the player.
     if (statusText)
         statusText->set_text("Map installed — pick it in the song picker (Custom Levels).");
 }
@@ -406,10 +387,8 @@ void FeedView::PlaySelected() {
     if (playButton) playButton->set_interactable(false);
     if (playButtonText) playButtonText->set_text("Downloading...");
 
-    // This callback crosses the installer's non-attached worker thread —
-    // constructing/copying/destroying a SafePtr there is not legal (GC
-    // handle ops need an attached thread), so it captures only plain data
-    // and resolves the live view on the main thread via state.activeView.
+    // Runs on the installer's worker thread: capture plain data only and find
+    // the live view back on the main thread.
     Installer::DownloadAndInstallAsync(entry.songHash, [entry](bool success, std::string error) {
         BSML::MainThreadScheduler::Schedule([entry, success, error = std::move(error)]() mutable {
             if (!success) {
@@ -436,10 +415,7 @@ void FeedView::PlaySelected() {
                 if (view->playButton) view->playButton->set_interactable(true);
                 if (level) {
                     if (view->playButtonText) view->playButtonText->set_text("Play");
-                    // Only auto-launch if the user is still on this tab AND
-                    // this score is still the selected one — downloading
-                    // score A while score B's modal is open (or from another
-                    // screen) would yank them somewhere they didn't ask to go.
+                    // Only auto-launch if they're still here with the same score open.
                     auto const& entries = CurrentEntries();
                     bool stillSelected = state.selected >= 0
                         && state.selected < static_cast<int>(entries.size())
@@ -461,9 +437,7 @@ void FeedView::PlaySelected() {
 
 void FeedView::Refresh() {
     if (state.feedRefreshInFlight.load()) {
-        // A fetch from a previous (possibly destroyed) view is still running.
-        // Give a freshly recreated view something other than a blank screen
-        // while it completes.
+        // A fetch from an earlier view is still running.
         if (statusText) statusText->set_text("Loading...");
         return;
     }
@@ -479,10 +453,8 @@ void FeedView::Refresh() {
     int scoresPerPlayer = std::clamp(getModConfig().ScoresPerPlayer.GetValue(), 1, 10);
     int feedCount = std::clamp(getModConfig().FeedCount.GetValue(), 10, 100);
 
-    // The callbacks deliberately use state.activeView (the most recently
-    // activated view) instead of capturing `this`: the tab GameObject can
-    // be destroyed and recreated while the fetch runs, and the results
-    // must land on whichever view is alive when they arrive.
+    // Results go to whichever view is alive when they land (the tab can be
+    // rebuilt mid-fetch), not `this`.
     FetchFeedAsync(
         playerInput, maxPlayers, scoresPerPlayer, feedCount,
         [generation](std::string progress) {
@@ -561,9 +533,9 @@ void FeedView::RefreshProfile() {
     std::string playerInput = getModConfig().PlayerId.GetValue();
     int count = std::clamp(getModConfig().FeedCount.GetValue(), 10, 100);
     int sortIndex = state.profileSort;
-    auto const sort = PROFILE_SORTS[sortIndex];
+    bool ascending = state.profileAscending;
     FetchProfileAsync(
-        playerInput, sort.sortBy, sort.order, count,
+        playerInput, ProfileSort::Query(sortIndex, ascending), count,
         [generation](std::string progress) {
             BSML::MainThreadScheduler::Schedule([generation, progress = std::move(progress)] {
                 if (generation != state.profileRefreshGeneration.load() || !state.showingProfile) return;
@@ -571,14 +543,14 @@ void FeedView::RefreshProfile() {
                 if (view && view->statusText) view->statusText->set_text(progress);
             });
         },
-        [generation, sortIndex](ProfileResult result) {
+        [generation, sortIndex, ascending](ProfileResult result) {
             state.profileRefreshInFlight.store(false);
-            BSML::MainThreadScheduler::Schedule([generation, sortIndex, result = std::move(result)]() mutable {
+            BSML::MainThreadScheduler::Schedule([generation, sortIndex, ascending, result = std::move(result)]() mutable {
                 if (generation != state.profileRefreshGeneration.load()) return;
                 auto* view = ActiveViewAlive();
-                // A dropdown change while the old request was running must
-                // not label old-order data as the newly selected order.
-                if (sortIndex != state.profileSort) {
+                // A sort or direction change while the old request was
+                // running must not label old-order data as the new order.
+                if (sortIndex != state.profileSort || ascending != state.profileAscending) {
                     if (view && state.showingProfile) view->RefreshProfile();
                     return;
                 }
@@ -645,20 +617,11 @@ void FeedView::ShowProfile() {
 void FeedView::BuildUI() {
     auto self = this;
 
-    // Do NOT stretch our own rect to fill the parent. #7f2b4e65 filled it
-    // (anchorMin 0,0 / anchorMax 1,1) to gain list height, but the parent
-    // container extends UP behind the game's gameplay-setup tab strip, so
-    // moving our rect's top to the parent top dragged the top-pinned header
-    // (below) up ON TOP of the game's "Vanilla / Mods / ReeSabers / Qounters++"
-    // tabs and doubled the mod's own tab row over them (regression in
-    // ingame4). Keep BSML's natural tab placement instead — its top already
-    // sits below the game's tab strip, which is why the header did not overlap
-    // before #7f2b4e65 — and gain the taller list purely from the parent-
-    // height measurement below, which reads the true tab bounds regardless of
-    // our own rect's anchors (so the height win is preserved without the
-    // overlap).
+    // Don't stretch our rect to the parent: the parent reaches up behind the
+    // game's tab strip and the header would cover it. List height comes from
+    // the measurement further down instead.
 
-    // Vertical stack pinned to the TOP of the tab area so it grows downward.
+    // Pinned to the top of the tab so it grows downward.
     auto root = BSML::Lite::CreateVerticalLayoutGroup(get_transform());
     root->set_childControlWidth(true);
     root->set_childControlHeight(true);
@@ -675,9 +638,7 @@ void FeedView::BuildUI() {
     rootRect->set_anchoredPosition({0.0f, 0.0f});
     auto parent = root->get_transform();
 
-    // In-tab navigation avoids registering another gameplay-setup tab (and
-    // consuming more of the shared Mods tab strip) while still keeping both
-    // datasets cached independently.
+    // Following / My Profile switch inside the one tab.
     auto navRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
     navRow->set_childControlWidth(true);
     navRow->set_childControlHeight(true);
@@ -688,9 +649,17 @@ void FeedView::BuildUI() {
     navElement->set_preferredWidth(CONTENT_WIDTH);
     BSML::Lite::CreateUIButton(navRow->get_transform(), "Following", [self]() { self->ShowFollowing(); });
     BSML::Lite::CreateUIButton(navRow->get_transform(), "My Profile", [self]() { self->ShowProfile(); });
+    // My Profile sort direction. Up here because the control row is full;
+    // fixed width so "Shortest first" fits. Hidden on Following.
+    orderButton = BSML::Lite::CreateUIButton(navRow->get_transform(), "", {0.0f, 0.0f}, {28.0f, 0.0f}, [self]() {
+        state.profileAscending = !state.profileAscending;
+        self->UpdateOrderButton();
+        self->RefreshProfile();
+    });
+    orderButtonText = orderButton->GetComponentInChildren<TMPro::TextMeshProUGUI*>();
+    UpdateOrderButton();
 
-    // Single control row: player filter dropdown on the left, scores-to-
-    // pull setting and refresh on the right.
+    // Filter/sort dropdown, Scores stepper, Refresh.
     auto topRow = BSML::Lite::CreateHorizontalLayoutGroup(parent);
     topRow->set_childControlWidth(true);
     topRow->set_childControlHeight(true);
@@ -700,8 +669,7 @@ void FeedView::BuildUI() {
     auto topRowElement = topRow->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
     topRowElement->set_preferredWidth(CONTENT_WIDTH);
 
-    // Filter dropdown holder (dropdown recreated after each refresh);
-    // flexes so the remaining controls land on the row's right edge.
+    // The dropdown is rebuilt after every refresh; this holder flexes.
     auto filterHolder = BSML::Lite::CreateHorizontalLayoutGroup(topRow->get_transform());
     filterHolder->set_childControlWidth(true);
     filterHolder->set_childControlHeight(true);
@@ -723,8 +691,7 @@ void FeedView::BuildUI() {
         self->RefreshCurrent();
     });
 
-    // Secondary info line: small and muted so the score rows below stay
-    // the visual focus.
+    // Small muted status line.
     statusText = BSML::Lite::CreateText(parent, "");
     statusText->set_fontSize(2.4f);
     statusText->set_color({0.62f, 0.68f, 0.76f, 1.0f});
@@ -733,27 +700,9 @@ void FeedView::BuildUI() {
     statusElement->set_preferredWidth(CONTENT_WIDTH);
     statusElement->set_preferredHeight(6.5f);
 
-    // The scrollable list carries its own LayoutElement sized from the
-    // sizeDelta we pass, so it slots into the stack as a normal child.
-    // CreateList wires onCellWithIdxClicked to the TableView's
-    // own didSelectCellWithIdxEvent (a field on HMUI::TableView itself,
-    // confirmed via extern/includes/bs-cordl/include/HMUI/zzzz__TableView_def.hpp
-    // — offset 0x50, independent of _dataSource). That event fires
-    // whenever a cell reports selection regardless of which IDataSource
-    // is installed, so swapping SetDataSource below does not disturb it
-    // and no extra add_didSelectCellWithIdxEvent wiring is needed here.
-    // Size the list to the tab's MEASURED height: the scroll viewport
-    // inside CreateList is sized once at creation and does not
-    // follow later RectTransform changes, so the height must be right up
-    // front. DidActivate defers BuildUI until the rect reports a real
-    // height; 34 is only the last-resort fallback.
-    // The mod's OWN tab rect can under-report the usable panel: on-device
-    // (task #7f2b4e65 screenshots) the list rendered only ~2 rows with clear
-    // empty space below. Measure the parent container too and size the list
-    // to the LARGER available height so we fill the real panel rather than a
-    // stale self-rect. All candidate heights are logged so the true on-device
-    // values are definitive for follow-up tuning. Grandparent is logged for
-    // diagnosis only — we do NOT size to it, to avoid growing past this tab.
+    // The list's scroll viewport is sized once at creation, so measure the
+    // real tab height first (DidActivate waits for it). Our own rect can
+    // under-report, so use the larger of it and the parent's.
     auto heightOf = [](UnityEngine::RectTransform* r) -> float {
         return r ? r->get_rect().get_height() : 0.0f;
     };
@@ -772,20 +721,13 @@ void FeedView::BuildUI() {
     SnipeFeedLogger.info("Gameplay setup tab height own={:.1f} parent={:.1f} grandparent={:.1f} using={:.1f}, list height {:.1f}",
                          ownHeight, parentHeight, grandparentHeight, tabHeight, listHeight);
 
-    // CreateList still provides the HMUI TableView/ScrollView used by the
-    // custom side bar and thumbstick input, but unlike CreateScrollableList
-    // it does not manufacture the stock caret siblings. Those siblings are
-    // not stored in ScrollView::_pageUpButton/_pageDownButton by BSML 0.4.55,
-    // which is why trying to hide or destroy those fields left △ visible.
+    // CreateList rather than CreateScrollableList: no stock page arrows.
     listData = BSML::Lite::CreateList(parent, {0.0f, 0.0f}, {CONTENT_WIDTH, listHeight}, [self](int idx) {
         self->OnCellClicked(idx);
     });
     listData->tableView->SetDataSource(reinterpret_cast<HMUI::TableView::IDataSource*>(this), false);
 
-    // Draggable side scrollbar (task #90576311). CreateList deliberately
-    // omits the stock page arrows; this always-visible bar is the pointer
-    // control, while thumbstick scrolling remains the ScrollView's own input
-    // path. Sizes below are centralized here for a quick device retune.
+    // Draggable scrollbar on the right edge; the thumbstick still scrolls too.
     if (auto scrollView = listData->tableView->_scrollView) {
         // Fill the arrow-free list rect so the rows use its full height.
         if (auto viewport = scrollView->_viewport) {
@@ -800,8 +742,7 @@ void FeedView::BuildUI() {
         constexpr float HANDLE_INIT_HEIGHT = 6.0f;  // FeedScrollBar resizes on sync
         auto whitePixel = BSML::Utilities::ImageResources::GetWhitePixel();
 
-        // Track: pinned to the list's right edge, full height, as a sibling of
-        // the scrolling viewport so it neither scrolls nor gets masked.
+        // Track: right edge, full height, outside the scrolling viewport.
         auto track = BSML::Lite::CreateImage(scrollView->get_transform(), whitePixel, {0.0f, 0.0f}, {0.0f, 0.0f});
         track->set_color({0.5f, 0.56f, 0.63f, 0.25f});
         track->set_raycastTarget(true);
@@ -812,8 +753,7 @@ void FeedView::BuildUI() {
         trackRect->set_sizeDelta({BAR_WIDTH, 0.0f});
         trackRect->set_anchoredPosition({BAR_INSET, 0.0f});
 
-        // Handle: top-stretched across the track; FeedScrollBar sets its height
-        // (∝ visible fraction) and Y (∝ scroll position) every sync.
+        // Handle: FeedScrollBar sets its height and position.
         auto handle = BSML::Lite::CreateImage(track->get_transform(), whitePixel, {0.0f, 0.0f}, {0.0f, 0.0f});
         handle->set_color({0.72f, 0.8f, 0.9f, 0.95f});
         handle->set_raycastTarget(true);
@@ -828,31 +768,50 @@ void FeedView::BuildUI() {
         bar->Setup(scrollView, trackRect, handleRect);
     }
 
-    // Detail modal: cover art + song text on top, avatar + player row,
-    // stats, then the play button. Sized to stay inside the gameplay
-    // setup panel.
-    detailModal = BSML::Lite::CreateModal(get_transform(), {76.0f, 46.0f}, nullptr, true);
+    // Detail modal.
+    detailModal = BSML::Lite::CreateModal(get_transform(), {MODAL_WIDTH, 52.0f}, nullptr, true);
     auto modalLayout = BSML::Lite::CreateVerticalLayoutGroup(detailModal->get_transform());
     modalLayout->set_childControlWidth(true);
     modalLayout->set_childControlHeight(true);
     modalLayout->set_childForceExpandWidth(true);
     modalLayout->set_childForceExpandHeight(false);
     modalLayout->set_spacing(1.0f);
-    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(2, 2, 2, 2));
+    modalLayout->set_padding(UnityEngine::RectOffset::New_ctor(MODAL_PADDING, MODAL_PADDING, MODAL_PADDING, MODAL_PADDING));
 
     auto coverRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     coverRow->set_childControlWidth(true);
     coverRow->set_childControlHeight(true);
     coverRow->set_childForceExpandWidth(false);
-    coverRow->set_spacing(2.0f);
-    modalCover = BSML::Lite::CreateImage(coverRow->get_transform(), nullptr, {0.0f, 0.0f}, {16.0f, 16.0f});
+    coverRow->set_childAlignment(UnityEngine::TextAnchor::UpperLeft);
+    coverRow->set_spacing(MODAL_GAP);
+    // Left column: cover, then the skill triangle under it.
+    auto coverColumn = BSML::Lite::CreateVerticalLayoutGroup(coverRow->get_transform());
+    coverColumn->set_childControlWidth(true);
+    coverColumn->set_childControlHeight(true);
+    coverColumn->set_childForceExpandWidth(false);
+    coverColumn->set_childForceExpandHeight(false);
+    coverColumn->set_childAlignment(UnityEngine::TextAnchor::UpperCenter);
+    coverColumn->set_spacing(1.0f);
+    auto columnElement = coverColumn->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    columnElement->set_preferredWidth(MODAL_COVER);
+    modalCover = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {MODAL_COVER, MODAL_COVER});
     auto coverElement = modalCover->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
-    coverElement->set_preferredWidth(16.0f);
-    coverElement->set_preferredHeight(16.0f);
+    coverElement->set_preferredWidth(MODAL_COVER);
+    coverElement->set_preferredHeight(MODAL_COVER);
     modalCover->set_preserveAspect(true);
+    modalTriangle = BSML::Lite::CreateImage(coverColumn->get_transform(), nullptr, {0.0f, 0.0f}, {14.0f, 14.0f});
+    auto triangleElement = modalTriangle->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    triangleElement->set_preferredWidth(14.0f);
+    triangleElement->set_preferredHeight(14.0f);
+    modalTriangle->set_preserveAspect(true);
+    modalTriangle->set_raycastTarget(false);
     detailText = BSML::Lite::CreateText(coverRow->get_transform(), "");
     detailText->set_fontSize(3.0f);
     detailText->set_enableWordWrapping(true);
+    // Fixed width so long lines wrap instead of pushing the row wider.
+    auto detailElement = detailText->get_gameObject()->AddComponent<UnityEngine::UI::LayoutElement*>();
+    detailElement->set_preferredWidth(MODAL_WIDTH - 2.0f * MODAL_PADDING - MODAL_COVER - MODAL_GAP);
+    detailElement->set_flexibleWidth(0.0f);
 
     auto playerRow = BSML::Lite::CreateHorizontalLayoutGroup(modalLayout->get_transform());
     playerRow->set_childControlWidth(true);
@@ -874,23 +833,15 @@ void FeedView::BuildUI() {
 }
 
 void FeedView::OnDestroy() {
-    // Un-pin the GC root when the pinned view is the one being destroyed;
-    // a dead view must not stay rooted until the next activation.
-    // state.activeView = SafePtrUnity<FeedView>() is not legal here either
-    // (same deleted operator= as DidActivate) — clear() is the equivalent
-    // reset to empty. The bool check guards ptr(): SafePtrUnity::ptr()
-    // throws/crashes on an empty or already-dead handle rather than
-    // returning nullptr, and a FeedView destroyed before ever being
-    // activated leaves state.activeView empty.
+    // Don't keep a destroyed view rooted. The bool check matters: ptr()
+    // throws on an empty handle.
     if (state.activeView && state.activeView.ptr() == this)
         state.activeView.clear();
 }
 
 void FeedView::DidActivate(bool firstActivation) {
     if (!listData) {
-        // The tab's RectTransform may not have its final height on the very
-        // first activation frame; the list viewport must be created at the
-        // right size (see BuildUI), so wait a frame until layout settles.
+        // The tab may not have its real height on the first frame; wait for it.
         float height = 0.0f;
         if (auto rect = GetComponent<UnityEngine::RectTransform*>())
             height = rect->get_rect().get_height();
@@ -905,18 +856,11 @@ void FeedView::DidActivate(bool firstActivation) {
         BuildUI();
     }
 
-    // In-flight fetch results and progress land on the most recently
-    // activated view — that's us now.
-    // SafePtrUnity's copy-assignment is implicitly deleted (it declares a
-    // move constructor, which per [class.copy.assign] suppresses the
-    // implicit copy-assign operator), and the only other operator= overloads
-    // take T*/T& by IMPLICIT conversion — SafePtrUnity's operator T* is
-    // explicit, so it can't satisfy them either. emplace() performs the
-    // equivalent rooting without going through operator=.
+    // Async results go to the latest view, which is us now. emplace() frees
+    // the previous handle.
     state.activeView.emplace(this);
 
-    // Defensive: if a hide was ever interrupted (menu hop, tab switch),
-    // clear the modal the moment the tab shows again.
+    // Clear a modal left over from an interrupted hide.
     if (detailModal) detailModal->HMUI::ModalView::Hide(false, nullptr);
 
     long long lastFetch = state.showingProfile ? state.lastProfileFetchTime : state.lastFeedFetchTime;

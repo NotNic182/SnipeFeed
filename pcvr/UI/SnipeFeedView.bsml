@@ -130,7 +130,7 @@
                   child-align='UpperLeft'>
         <!-- spacing and pad-bottom leave room for the two-line corner
              labels above and below the triangle. -->
-        <vertical pref-width='16' spacing='3.5' pad-bottom='3.5'
+        <vertical pref-width='16' spacing='3.5' pad-bottom='4'
                   horizontal-fit='Unconstrained' vertical-fit='Unconstrained'
                   child-control-width='true' child-control-height='true'
                   child-expand-width='false' child-expand-height='false'

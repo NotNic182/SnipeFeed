@@ -14,6 +14,8 @@ namespace SnipeFeed.PC
     [Plugin(RuntimeOptions.SingleStartInit)]
     public sealed class Plugin
     {
+        internal const string UserAgent = "SnipeFeed-PC/3.4.0";
+
         internal static Logger Log { get; private set; }
         private static GameplaySetup _registeredGameplaySetup;
         private static readonly SnipeFeedView View = new SnipeFeedView();

@@ -1,5 +1,6 @@
 using SnipeFeed.PC.Models;
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace SnipeFeed.PC.Utils
@@ -79,11 +80,66 @@ namespace SnipeFeed.PC.Utils
 
             info += "\n" + StatsLine(e);
 
+            var extra = ExtraStatsLine(e);
+            if (!string.IsNullOrEmpty(extra))
+                info += "\n" + extra;
+
             var ago = TimeAgo(e.Timepost);
             if (!string.IsNullOrEmpty(ago))
                 info += "\n<size=75%><color=#777777>" + ago + "</color></size>";
             return info;
         }
+
+        // What a profile row is sorted by, when the row doesn't already show
+        // it (date, pp, acc and stars are always on the row). Empty if the
+        // score didn't come with that stat.
+        public static string SortValue(FeedEntry e, string sortBy)
+        {
+            string text = null;
+            switch (sortBy)
+            {
+                case "accPP": if (e.AccPp >= 0f) text = Whole(e.AccPp) + "pp acc"; break;
+                case "passPP": if (e.PassPp >= 0f) text = Whole(e.PassPp) + "pp pass"; break;
+                case "techPP": if (e.TechPp >= 0f) text = Whole(e.TechPp) + "pp tech"; break;
+                case "scoreValue": if (e.Score >= 0) text = Thousands(e.Score); break;
+                case "rank": if (e.Placement > 0) text = "#" + Thousands(e.Placement); break;
+                case "playCount": if (e.PlayCount >= 0) text = Count(e.PlayCount, "play", "plays"); break;
+                case "pauses": if (e.Pauses >= 0) text = Count(e.Pauses, "pause", "pauses"); break;
+                case "maxStreak": if (e.MaxStreak >= 0) text = "streak " + Thousands(e.MaxStreak); break;
+                case "sotwNominations": if (e.Nominations >= 0) text = Count(e.Nominations, "nomination", "nominations"); break;
+                case "replaysWatched": if (e.ReplaysWatched >= 0) text = Thousands(e.ReplaysWatched) + " watched"; break;
+                case "mistakes": if (e.Mistakes >= 0) text = Count(e.Mistakes, "mistake", "mistakes"); break;
+                // The title shows the map's stars; BeatLeader sorts by the
+                // modifier-adjusted value, so show that when modifiers moved it.
+                case "stars":
+                    if (!string.IsNullOrEmpty(e.StarModifiers))
+                        text = e.EffectiveStars.ToString("0.00", CultureInfo.InvariantCulture) + "★ with " + EscapeForTmp(e.StarModifiers);
+                    break;
+            }
+            return string.IsNullOrEmpty(text) ? "" : "<color=#FFD27A>" + text + "</color>";
+        }
+
+        // One short line of extra score stats for the detail modal. Zero
+        // pauses, plays, views and nominations are left out to keep it short.
+        public static string ExtraStatsLine(FeedEntry e)
+        {
+            var parts = new List<string>();
+            if (e.Placement > 0) parts.Add("#" + Thousands(e.Placement) + " on map");
+            if (e.Mistakes >= 0) parts.Add(Count(e.Mistakes, "mistake", "mistakes"));
+            if (e.Pauses > 0) parts.Add(Count(e.Pauses, "pause", "pauses"));
+            if (e.MaxStreak > 0) parts.Add("streak " + Thousands(e.MaxStreak));
+            if (e.PlayCount > 0) parts.Add(Count(e.PlayCount, "play", "plays"));
+            if (e.ReplaysWatched > 0) parts.Add(Thousands(e.ReplaysWatched) + " watched");
+            if (e.Nominations > 0) parts.Add(Count(e.Nominations, "nomination", "nominations"));
+            if (parts.Count == 0) return "";
+            return "<size=70%><color=#AABBCC>" + string.Join(" • ", parts) + "</color></size>";
+        }
+
+        public static string Thousands(long value) => value.ToString("#,0", CultureInfo.InvariantCulture);
+
+        private static string Count(long n, string singular, string plural) => Thousands(n) + " " + (n == 1 ? singular : plural);
+
+        private static string Whole(float value) => value.ToString("0", CultureInfo.InvariantCulture);
 
         private static string DiffAndStars(FeedEntry e, string size)
         {

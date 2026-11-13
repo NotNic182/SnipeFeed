@@ -10,6 +10,11 @@
     <AppOutputBase>$(MSBuildProjectDirectory)\</AppOutputBase>
     <LocalRefsDir Condition="Exists('..\..\Refs')">..\..\Refs</LocalRefsDir>
     <BeatSaberDir Condition="'$(BeatSaberDir)' == ''">$(LocalRefsDir)</BeatSaberDir>
+    <BSMTProjectType>BSIPA</BSMTProjectType>
+    <!-- The manifest's gameVersion comes from the game in BeatSaberDir (or
+         -p:GameVersion=...), so the same source builds for each version. -->
+    <GameDataFile>$(BeatSaberDir)\Beat Saber_Data\globalgamemanagers</GameDataFile>
+    <GameVersion Condition="'$(GameVersion)' == '' And Exists('$(GameDataFile)')">$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(GameDataFile)')), '\d+\.\d+\.\d+(?=_\d+)'))</GameVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -73,9 +78,18 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="manifest.json" />
+    <EmbeddedResource Include="$(IntermediateOutputPath)manifest.json" LogicalName="SnipeFeed.PC.manifest.json" />
     <EmbeddedResource Include="UI\SnipeFeedView.bsml" />
   </ItemGroup>
+
+  <Target Name="WriteManifest" BeforeTargets="BSMT_StartBSIPA;BeforeBuild">
+    <PropertyGroup>
+      <ManifestText>$([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)\manifest.json'))</ManifestText>
+      <ManifestText Condition="'$(GameVersion)' != ''">$([System.Text.RegularExpressions.Regex]::Replace($(ManifestText), '"gameVersion":\s*"[^"]*"', '"gameVersion": "$(GameVersion)"'))</ManifestText>
+      <ManifestPath>$(IntermediateOutputPath)manifest.json</ManifestPath>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(ManifestPath)" Lines="$(ManifestText)" Overwrite="true" WriteOnlyWhenDifferent="true" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="BeatSaberModdingTools.Tasks" Version="2.0.0-beta7">

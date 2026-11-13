@@ -100,6 +100,15 @@ namespace SnipeFeed.PC.UI
         [UIComponent("modal-triangle")]
         private ImageView _modalTriangle;
 
+        [UIComponent("modal-tech-label")]
+        private TextMeshProUGUI _modalTechLabel;
+
+        [UIComponent("modal-acc-label")]
+        private TextMeshProUGUI _modalAccLabel;
+
+        [UIComponent("modal-pass-label")]
+        private TextMeshProUGUI _modalPassLabel;
+
         [UIComponent("modal-avatar")]
         private ImageView _modalAvatar;
 
@@ -161,6 +170,7 @@ namespace SnipeFeed.PC.UI
 
             CompactHeaderRow();
             UpdateOrderButton();
+            AttachTriangleLabels(_modalTriangle, _modalTechLabel, _modalAccLabel, _modalPassLabel);
 
             // Re-run the refresh/rebuild logic whenever the tab becomes
             // visible again (BSML only parses once per menu build, but the
@@ -542,7 +552,9 @@ namespace SnipeFeed.PC.UI
                     : null;
                 _modalTriangle.sprite = triangle;
                 // Inactive, so unrated maps leave no gap under the cover.
+                // The labels are its children and go with it.
                 _modalTriangle.gameObject.SetActive(triangle != null);
+                SetTriangleLabels(_selected, true, _modalTechLabel, _modalAccLabel, _modalPassLabel);
             }
 
             // Images, with the same stale-guard the rows use.
@@ -783,6 +795,51 @@ namespace SnipeFeed.PC.UI
                 _detailModal.transform.SetParent(_modalOriginalParent, true);
         }
 
+        // Moves the rating labels onto the triangle's corners: Tech and Acc
+        // just above the top corners, Pass just under the bottom point.
+        private static void AttachTriangleLabels(ImageView triangle, TextMeshProUGUI tech, TextMeshProUGUI acc, TextMeshProUGUI pass)
+        {
+            AttachTriangleLabel(triangle, tech, SkillTriangle.TechCorner, new Vector2(0f, 0f), TextAlignmentOptions.BottomLeft);
+            AttachTriangleLabel(triangle, acc, SkillTriangle.AccCorner, new Vector2(1f, 0f), TextAlignmentOptions.BottomRight);
+            AttachTriangleLabel(triangle, pass, SkillTriangle.PassCorner, new Vector2(0.5f, 1f), TextAlignmentOptions.Top);
+        }
+
+        private static void AttachTriangleLabel(ImageView triangle, TextMeshProUGUI label, Vector2 corner, Vector2 pivot, TextAlignmentOptions alignment)
+        {
+            if (triangle == null || label == null) return;
+            var layout = label.GetComponent<LayoutElement>();
+            if (layout != null) layout.ignoreLayout = true;
+
+            var rect = label.rectTransform;
+            rect.SetParent(triangle.rectTransform, false);
+            rect.anchorMin = corner;
+            rect.anchorMax = corner;
+            rect.pivot = pivot;
+            // A small gap so the text doesn't sit on the triangle's outline.
+            rect.anchoredPosition = new Vector2(0f, pivot.y > 0.5f ? -0.1f * label.fontSize : 0.1f * label.fontSize);
+            rect.sizeDelta = new Vector2(12f, label.fontSize * 2.6f);
+            label.alignment = alignment;
+            label.overflowMode = TextOverflowModes.Overflow;
+            label.raycastTarget = false;
+        }
+
+        // Rows show just the numbers; the modal has room for the names too.
+        private static void SetTriangleLabels(FeedEntry entry, bool withNames, TextMeshProUGUI tech, TextMeshProUGUI acc, TextMeshProUGUI pass)
+        {
+            SetTriangleLabel(tech, entry, "Tech", entry.TechRating, withNames);
+            SetTriangleLabel(acc, entry, "Acc", entry.AccRating, withNames);
+            SetTriangleLabel(pass, entry, "Pass", entry.PassRating, withNames);
+        }
+
+        private static void SetTriangleLabel(TextMeshProUGUI label, FeedEntry entry, string name, float rating, bool withName)
+        {
+            if (label == null) return;
+            label.gameObject.SetActive(entry.HasRatings);
+            label.text = withName
+                ? "<size=85%>" + name + "</size>\n" + rating.ToString("0.00", CultureInfo.InvariantCulture)
+                : rating.ToString("0.0", CultureInfo.InvariantCulture);
+        }
+
         private static void ResetImage(ImageView image)
         {
             if (image == null) return;
@@ -836,6 +893,18 @@ namespace SnipeFeed.PC.UI
             [UIComponent("triangle-image")]
             private ImageView _triangle;
 
+            [UIComponent("tech-label")]
+            private TextMeshProUGUI _techLabel;
+
+            [UIComponent("acc-label")]
+            private TextMeshProUGUI _accLabel;
+
+            [UIComponent("pass-label")]
+            private TextMeshProUGUI _passLabel;
+
+            [UIComponent("title-text")]
+            private TextMeshProUGUI _title;
+
             [UIObject("song-line")]
             private GameObject _songLine;
 
@@ -886,6 +955,15 @@ namespace SnipeFeed.PC.UI
                         line.AddComponent<RectMask2D>();
                 }
 
+                // Long titles shrink to fit so the difficulty and stars at
+                // the end stay visible.
+                if (_title != null)
+                {
+                    _title.enableAutoSizing = true;
+                    _title.fontSizeMin = 2.2f;
+                    _title.fontSizeMax = 3.4f;
+                }
+
                 // No ratings, no triangle; the image stays in the layout so
                 // rows keep their columns lined up.
                 if (_triangle != null)
@@ -896,6 +974,8 @@ namespace SnipeFeed.PC.UI
                     _triangle.sprite = triangle;
                     _triangle.color = Color.white;
                     _triangle.enabled = triangle != null;
+                    AttachTriangleLabels(_triangle, _techLabel, _accLabel, _passLabel);
+                    SetTriangleLabels(Entry, false, _techLabel, _accLabel, _passLabel);
                 }
 
                 ResetImage(_cover);

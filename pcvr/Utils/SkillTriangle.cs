@@ -14,6 +14,15 @@ namespace SnipeFeed.PC.Utils
         public const float MaxRating = 15f;
         private const int Supersample = 4;
         private const int MaxCached = 256;
+        // Corner inset, as a fraction of the image size.
+        private const float Margin = 0.07f;
+
+        // The corners as fractions of the image, y up like Unity UI, for
+        // placing labels next to them.
+        private static readonly float TopInset = (1f - (1f - 2f * Margin) * (float)Math.Sqrt(3.0) / 2f) / 2f;
+        public static readonly Vector2 TechCorner = new Vector2(Margin, 1f - TopInset);
+        public static readonly Vector2 AccCorner = new Vector2(1f - Margin, 1f - TopInset);
+        public static readonly Vector2 PassCorner = new Vector2(0.5f, TopInset);
 
         // Same colors as the Pass/Acc/Tech text on Quest.
         private static readonly Rgb TechColor = new Rgb(1f, 0.42f, 0.42f);
@@ -65,7 +74,7 @@ namespace SnipeFeed.PC.Utils
             float s = size;
 
             // Equilateral, point down, centered.
-            var margin = s * 0.07f;
+            var margin = s * Margin;
             var width = s - 2f * margin;
             var height = width * (float)Math.Sqrt(3.0) / 2f;
             var top = (s - height) / 2f;

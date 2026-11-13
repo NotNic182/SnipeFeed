@@ -78,12 +78,13 @@
                also cull VERTICALLY - a line even slightly taller than its
                rect renders as nothing at all (the Quest mod shipped this
                exact bug once, and this font's line height runs much taller
-               than the font size). Long lines are hard-clipped instead by
-               RectMask2Ds that FeedRow adds to these wrappers. -->
+               than the font size). FeedRow shrinks long titles to fit, and
+               RectMask2Ds on these wrappers hard-clip whatever still
+               doesn't. -->
           <horizontal id='song-line' pref-height='4.6' min-height='4.6'
                       child-control-width='true' child-control-height='true'
                       child-expand-width='true' child-expand-height='true'>
-            <text text='~song-text' font-size='3.4' align='MidlineLeft'
+            <text id='title-text' text='~song-text' font-size='3.4' align='MidlineLeft'
                   word-wrapping='false'/>
           </horizontal>
           <horizontal id='info-line' spacing='1.5' pref-height='3.9' min-height='3.9'
@@ -102,6 +103,10 @@
         </vertical>
         <image id='triangle-image' pref-width='7.5' pref-height='7.5'
                min-width='7.5' min-height='7.5' preserve-aspect='true'/>
+        <!-- Moved onto the triangle's corners by FeedRow. -->
+        <text id='tech-label' text='' font-size='1.7' color='#FF6B6B' word-wrapping='false'/>
+        <text id='acc-label' text='' font-size='1.7' color='#5AA9FF' word-wrapping='false'/>
+        <text id='pass-label' text='' font-size='1.7' color='#57D68D' word-wrapping='false'/>
         <text text='&gt;' font-size='4' color='#5A6B7A' align='Center'
               word-wrapping='false' pref-width='3'/>
         <horizontal tags='hovered' active='false' ignore-layout='true'
@@ -115,7 +120,7 @@
        it next to the song text, avatar + player row, then the play button.
        The text wrapper has a fixed width (76 - 2x2 pad - 16 cover - 2 gap)
        so long lines wrap instead of pushing the cover and name out. -->
-  <modal id='detail-modal' size-delta='76 54' click-off-closes='true'>
+  <modal id='detail-modal' size-delta='76 58' click-off-closes='true'>
     <vertical pad='2' spacing='1'
               horizontal-fit='Unconstrained' vertical-fit='Unconstrained'
               child-control-width='true' child-control-height='true'
@@ -123,7 +128,9 @@
       <horizontal spacing='2' child-control-width='true'
                   child-control-height='true' child-expand-width='false'
                   child-align='UpperLeft'>
-        <vertical pref-width='16' spacing='1'
+        <!-- spacing and pad-bottom leave room for the two-line corner
+             labels above and below the triangle. -->
+        <vertical pref-width='16' spacing='3.5' pad-bottom='3.5'
                   horizontal-fit='Unconstrained' vertical-fit='Unconstrained'
                   child-control-width='true' child-control-height='true'
                   child-expand-width='false' child-expand-height='false'
@@ -132,6 +139,9 @@
                  min-width='16' min-height='16' preserve-aspect='true'/>
           <image id='modal-triangle' pref-width='14' pref-height='14'
                  preserve-aspect='true'/>
+          <text id='modal-tech-label' text='' font-size='2.2' color='#FF6B6B' word-wrapping='false'/>
+          <text id='modal-acc-label' text='' font-size='2.2' color='#5AA9FF' word-wrapping='false'/>
+          <text id='modal-pass-label' text='' font-size='2.2' color='#57D68D' word-wrapping='false'/>
         </vertical>
         <horizontal pref-width='54' child-control-width='true'
                     child-control-height='true' child-expand-width='true'>
